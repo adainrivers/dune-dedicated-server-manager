@@ -1,0 +1,162 @@
+:root {
+  --void: #070908;
+  --basalt: #101412;
+  --basalt-2: #171d19;
+  --steel: #2c312e;
+  --steel-dark: #0c0f0f;
+  --steel-edge: #65665c;
+  --panel: rgba(20, 23, 21, 0.9);
+  --panel-strong: rgba(38, 40, 34, 0.94);
+  --line: rgba(224, 178, 96, 0.22);
+  --line-cool: rgba(90, 199, 184, 0.28);
+  --sand: #d9a857;
+  --sand-hot: #f5c877;
+  --spice: #b76635;
+  --teal: #5ed8c8;
+  --teal-soft: #a8f4e9;
+  --text: #f3eee1;
+  --muted: #b8b09d;
+  --dim: #7f887c;
+  --bad: #ef8175;
+  color: var(--text);
+  background: var(--void);
+  font-family: Bahnschrift, "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 960px;
+  min-height: 100vh;
+  background:
+    linear-gradient(100deg, rgba(255, 255, 255, 0.035), transparent 16% 84%, rgba(255, 255, 255, 0.025)),
+    linear-gradient(120deg, rgba(94, 216, 200, 0.08), transparent 32%),
+    linear-gradient(155deg, rgba(217, 168, 87, 0.18) 0 12%, transparent 38%),
+    linear-gradient(180deg, #171712 0, #0b0e0d 48%, #060807 100%);
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  content: "";
+  background-image:
+    linear-gradient(rgba(255, 220, 150, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 220, 150, 0.035) 1px, transparent 1px),
+    repeating-linear-gradient(112deg, rgba(183, 102, 53, 0.07) 0 1px, transparent 1px 13px);
+  background-size:
+    52px 52px,
+    52px 52px,
+    100% 100%;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.35));
+}
+
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  opacity: 0.48;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.32), transparent 18%, transparent 82%, rgba(0, 0, 0, 0.36)),
+    repeating-radial-gradient(circle at 50% 10%, rgba(255, 232, 170, 0.05) 0 1px, transparent 1px 4px);
+  mix-blend-mode: screen;
+}
+
+button,
+.button-link,
+input,
+select {
+  font: inherit;
+  font-size: 14px;
+}
+
+button,
+.button-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid rgba(184, 183, 165, 0.28);
+  border-radius: 6px;
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 238, 0.16), rgba(255, 255, 255, 0.035) 42%, rgba(0, 0, 0, 0.28) 43%, rgba(0, 0, 0, 0.1)),
+    repeating-linear-gradient(92deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 6px),
+    linear-gradient(135deg, #303630, #151a18 58%, #252117);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 238, 0.2),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.72),
+    0 1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 20px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+}
+
+button::before,
+.button-link::before {
+  position: absolute;
+  inset: 1px 1px auto;
+  height: 45%;
+  pointer-events: none;
+  content: "";
+  border-radius: 5px 5px 2px 2px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent);
+}
+
+button:hover:not(:disabled),
+.button-link:hover {
+  border-color: rgba(94, 216, 200, 0.68);
+  color: var(--teal-soft);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 245, 0.2), rgba(94, 216, 200, 0.08) 42%, rgba(0, 0, 0, 0.24) 43%),
+    repeating-linear-gradient(92deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 6px),
+    linear-gradient(135deg, #38423d, #172420 58%, #2d281a);
+  transform: translateY(-1px);
+}
+
+button:active:not(:disabled),
+.button-link:active {
+  transform: translateY(0);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+button.primary {
+  color: #061411;
+  border-color: rgba(190, 255, 244, 0.58);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.38), transparent 42%, rgba(0, 0, 0, 0.18) 43%),
+    repeating-linear-gradient(92deg, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px 8px),
+    linear-gradient(135deg, var(--teal-soft), var(--teal) 58%, #d4b36a);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 12px 28px rgba(94, 216, 200, 0.2);
+}
+
+button.primary:hover:not(:disabled) {
+  color: #03100e;
+  background:
+    linear-gradient(135deg, #d6fff8, #76e8d9 54%, var(--sand-hot));
+}
+
+a {
+  color: var(--teal-soft);
+  text-decoration: none;
+}
+
