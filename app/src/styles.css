@@ -72,12 +72,14 @@ body::after {
 }
 
 button,
+.button-link,
 input {
   font: inherit;
   font-size: 14px;
 }
 
-button {
+button,
+.button-link {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -100,7 +102,8 @@ button {
   cursor: pointer;
 }
 
-button::before {
+button::before,
+.button-link::before {
   position: absolute;
   inset: 1px 1px auto;
   height: 45%;
@@ -110,7 +113,8 @@ button::before {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent);
 }
 
-button:hover:not(:disabled) {
+button:hover:not(:disabled),
+.button-link:hover {
   border-color: rgba(94, 216, 200, 0.68);
   color: var(--teal-soft);
   background:
@@ -120,7 +124,8 @@ button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
-button:active:not(:disabled) {
+button:active:not(:disabled),
+.button-link:active {
   transform: translateY(0);
 }
 
@@ -754,6 +759,47 @@ tr:hover {
   overflow-wrap: anywhere;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric {
+  min-height: 74px;
+  padding: 12px;
+  border: 1px solid rgba(217, 168, 87, 0.18);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(0, 0, 0, 0.18)),
+    rgba(8, 11, 10, 0.58);
+}
+
+.metric strong,
+.metric span {
+  display: block;
+}
+
+.metric strong {
+  color: var(--teal-soft);
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.metric span {
+  margin-top: 7px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.director-console iframe {
+  width: 100%;
+  min-height: 680px;
+  border: 1px solid rgba(217, 168, 87, 0.2);
+  border-radius: 7px;
+  background: #0b0e0d;
+}
+
 .empty-state {
   padding: 20px;
   border: 1px dashed rgba(217, 168, 87, 0.28);
@@ -810,6 +856,7 @@ tr:hover {
   }
 
   .status-strip,
+  .metric-grid,
   .grid.two,
   .config-summary,
   .settings-grid,

@@ -6,6 +6,7 @@ import {
   Download,
   ExternalLink,
   HardDrive,
+  Map,
   MinusCircle,
   PackagePlus,
   RadioTower,
@@ -17,6 +18,7 @@ import {
   SlidersHorizontal,
   Square,
   Terminal,
+  Users,
   XCircle,
   Wifi,
   type LucideIcon
@@ -187,7 +189,50 @@ type ManagerApiInstallResult = {
   url: string;
 };
 
-type ViewKey = "overview" | "host" | "manager" | "battlegroups" | "workloads" | "config" | "logs";
+type DirectorPlayerSummary = {
+  active: number;
+  online: number;
+  inTransit: number;
+  gracePeriod: number;
+  completion: number;
+  queued: number;
+  loginRequestsTotal: number;
+  travelRequestsTotal: number;
+};
+
+type DirectorServerSummary = {
+  label: string;
+  serverId: string;
+  partitionId?: number | null;
+  dimensionIndex?: number | null;
+  players: number;
+  online: number;
+  queued?: number | null;
+  status: string;
+  heartbeatSecondsAgo?: number | null;
+  hasOverride: boolean;
+};
+
+type DirectorMapSummary = {
+  name: string;
+  kind: string;
+  players: number;
+  online: number;
+  queued: number;
+  servers: DirectorServerSummary[];
+  hasOverride: boolean;
+};
+
+type ViewKey =
+  | "overview"
+  | "host"
+  | "manager"
+  | "players"
+  | "battlegroups"
+  | "workloads"
+  | "director"
+  | "config"
+  | "logs";
 
 const defaultConfig: AppConfig = {
   installPath: "",
@@ -269,6 +314,27 @@ function EmptyState({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>;
 }
 
+function Metric({ label, value }: { label: string; value?: string | number | null }) {
+  return (
+    <div className="metric">
+      <strong>{value ?? "Unknown"}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function valueAt(value: unknown, path: string[]) {
+  let current = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || !(key in current)) return null;
+    current = (current as Record<string, unknown>)[key];
+  }
+  if (current === null || current === undefined) return null;
+  if (typeof current === "boolean") return current ? "true" : "false";
+  if (typeof current === "number" || typeof current === "string") return current;
+  return JSON.stringify(current);
+}
+
 function generateToken() {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
@@ -296,6 +362,10 @@ export default function App() {
   );
   const [managerError, setManagerError] = useState("");
   const [managerInstall, setManagerInstall] = useState<ManagerApiInstallResult | null>(null);
+  const [directorPlayers, setDirectorPlayers] = useState<DirectorPlayerSummary | null>(null);
+  const [directorMaps, setDirectorMaps] = useState<DirectorMapSummary[]>([]);
+  const [directorFlsConfig, setDirectorFlsConfig] = useState<Record<string, unknown> | null>(null);
+  const [directorTransferConfig, setDirectorTransferConfig] = useState<Record<string, unknown> | null>(null);
   const [activeView, setActiveView] = useState<ViewKey>("overview");
 
   const selectedBattleGroup = useMemo(
@@ -317,17 +387,22 @@ export default function App() {
   const managerTelemetryState = managerApiConfigured ? managerSocketState : "disabled";
   const canUseManager = managerApiConfigured && Boolean(managerStatus);
   const managerToolsInstalled = canUseManager;
+  const directorAvailable = Boolean(managerToolsInstalled && managerStatus?.directorConfigured);
   const managerInstallNamespace = config.managerApiNamespace.trim() || selectedBattleGroup?.namespace || "";
   const canInstallManagerApi = Boolean(canUseGuest && managerInstallNamespace && config.managerApiBinaryPath.trim());
-  const managerRequiredViews = ["battlegroups", "workloads", "config", "logs"];
+  const managerRequiredViews = ["battlegroups", "workloads", "config", "logs", "players", "director"];
+  const directorRequiredViews = ["players", "director"];
   const activeViewRequiresManager = managerRequiredViews.includes(activeView);
+  const activeViewRequiresDirector = directorRequiredViews.includes(activeView);
   const viewLabels: Record<ViewKey, string> = {
     overview: "Overview",
     host: "Host & VM",
     manager: "Manager API",
+    players: "Players",
     battlegroups: "BattleGroups",
     workloads: "Pods & Services",
-    config: "Live Config",
+    director: "Director",
+    config: "Config",
     logs: "Logs"
   };
   const pageTitle = activeView === "overview" ? selectedBattleGroup?.title || "Dune Awakening" : viewLabels[activeView];
@@ -339,11 +414,20 @@ export default function App() {
     { key: "overview", label: "Overview", icon: Server },
     { key: "host", label: "Host & VM", icon: HardDrive },
     { key: "manager", label: "Manager API", icon: RadioTower },
+    { key: "players", label: "Players", icon: Users, disabled: !directorAvailable },
     { key: "battlegroups", label: "BattleGroups", icon: Activity, disabled: !managerToolsInstalled },
     { key: "workloads", label: "Pods & Services", icon: Database, disabled: !managerToolsInstalled },
+    { key: "director", label: "Director", icon: Map, disabled: !directorAvailable },
     { key: "config", label: "Config", icon: SlidersHorizontal, disabled: !managerToolsInstalled },
     { key: "logs", label: "Logs", icon: Terminal, disabled: !managerToolsInstalled }
   ];
+  const managerBaseUrl = config.managerApiUrl.trim().replace(/\/$/, "");
+  const directorProxyUrl =
+    managerBaseUrl && config.managerApiToken
+      ? `${managerBaseUrl}/director?token=${encodeURIComponent(config.managerApiToken)}`
+      : managerBaseUrl
+        ? `${managerBaseUrl}/director`
+        : "";
 
   async function capture<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
     try {
@@ -436,6 +520,9 @@ export default function App() {
         await Promise.all([loadWorkloads(group.namespace), loadBattleGroupDetail(group)]);
       }
     }
+    if (managerApiConfigured) {
+      await loadDirectorData();
+    }
     setBusy(false);
   }
 
@@ -451,6 +538,21 @@ export default function App() {
       )
     );
     setBattleGroupDetail(detail);
+  }
+
+  async function loadDirectorData() {
+    const [players, maps, flsConfig, transferConfig] = await Promise.all([
+      capture("Director players", () => managerRequest<DirectorPlayerSummary>("/api/director/players/summary")),
+      capture("Director maps", () => managerRequest<DirectorMapSummary[]>("/api/director/maps")),
+      capture("Director FLS config", () => managerRequest<Record<string, unknown>>("/api/director/config/fls")),
+      capture("Director character transfer config", () =>
+        managerRequest<Record<string, unknown>>("/api/director/config/character-transfer")
+      )
+    ]);
+    if (players) setDirectorPlayers(players);
+    if (maps) setDirectorMaps(maps);
+    if (flsConfig) setDirectorFlsConfig(flsConfig);
+    if (transferConfig) setDirectorTransferConfig(transferConfig);
   }
 
   async function startVm() {
@@ -655,8 +757,10 @@ export default function App() {
   useEffect(() => {
     if (activeViewRequiresManager && !managerToolsInstalled) {
       setActiveView("manager");
+    } else if (activeViewRequiresDirector && !directorAvailable) {
+      setActiveView("manager");
     }
-  }, [activeViewRequiresManager, managerToolsInstalled]);
+  }, [activeViewRequiresDirector, activeViewRequiresManager, directorAvailable, managerToolsInstalled]);
 
   const pods = workloads?.pods.items ?? [];
   const services = workloads?.services.items ?? [];
@@ -874,6 +978,46 @@ export default function App() {
           </section>
         )}
 
+        {managerToolsInstalled && !directorAvailable && (activeView === "overview" || activeView === "manager") && (
+          <section className="tool-required panel">
+            <div>
+              <Map size={24} />
+              <h2>Director bridge is unavailable</h2>
+            </div>
+            <p>
+              Native player telemetry, map runtime state, and the advanced Director console need the Manager API to
+              detect and reach the internal Director service.
+            </p>
+            <button onClick={refresh} disabled={busy}>
+              <RefreshCw size={16} />
+              Refresh
+            </button>
+          </section>
+        )}
+
+        {directorAvailable && (activeView === "overview" || activeView === "players") && (
+          <section className="panel">
+            <div className="panel-title">
+              <h2>Players</h2>
+              <Users size={19} />
+            </div>
+            {!directorPlayers ? (
+              <EmptyState text="No Director player telemetry loaded." />
+            ) : (
+              <div className="metric-grid">
+                <Metric label="Active" value={directorPlayers.active} />
+                <Metric label="Online" value={directorPlayers.online} />
+                <Metric label="In Transit" value={directorPlayers.inTransit} />
+                <Metric label="Grace Period" value={directorPlayers.gracePeriod} />
+                <Metric label="Completion" value={directorPlayers.completion} />
+                <Metric label="Queued" value={directorPlayers.queued} />
+                <Metric label="Login Requests" value={directorPlayers.loginRequestsTotal} />
+                <Metric label="Travel Requests" value={directorPlayers.travelRequestsTotal} />
+              </div>
+            )}
+          </section>
+        )}
+
         {managerToolsInstalled && (activeView === "overview" || activeView === "battlegroups") && (
             <section className="panel">
               <div className="panel-title">
@@ -965,6 +1109,7 @@ export default function App() {
         )}
 
         {managerToolsInstalled && activeView === "config" && (
+          <>
             <section className="panel">
               <div className="panel-title">
                 <h2>Live Config</h2>
@@ -1022,6 +1167,105 @@ export default function App() {
                 </>
               )}
             </section>
+            {directorAvailable && (
+              <section className="panel">
+                <div className="panel-title">
+                  <h2>Director Config</h2>
+                  <Map size={19} />
+                </div>
+                <section className="config-summary">
+                  <InfoRow
+                    label="FLS heartbeat"
+                    value={valueAt(directorFlsConfig, ["config", "flsServerHeartbeatUpdateFrequencySeconds"])}
+                  />
+                  <InfoRow
+                    label="FLS settings"
+                    value={valueAt(directorFlsConfig, ["config", "flsServerSettingsUpdateFrequencySeconds"])}
+                  />
+                  <InfoRow
+                    label="Incoming transfers"
+                    value={valueAt(directorTransferConfig, ["config", "incomingCharacterTransfers"])}
+                  />
+                  <InfoRow
+                    label="Outgoing transfers"
+                    value={valueAt(directorTransferConfig, ["config", "acceptOutgoingCharacterTransfers"])}
+                  />
+                  <InfoRow
+                    label="World closed"
+                    value={valueAt(directorTransferConfig, ["config", "forceIsWorldClosed"])}
+                  />
+                  <InfoRow
+                    label="World closing soon"
+                    value={valueAt(directorTransferConfig, ["config", "forceIsWorldClosingSoon"])}
+                  />
+                </section>
+                <p className="subtle-line">
+                  Full override editing is available through the authenticated Advanced Director console.
+                </p>
+              </section>
+            )}
+          </>
+        )}
+
+        {directorAvailable && activeView === "director" && (
+          <>
+            <section className="panel">
+              <div className="panel-title">
+                <h2>Director Maps</h2>
+                <div className="button-row">
+                  {directorProxyUrl && (
+                    <a className="button-link" href={directorProxyUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink size={16} />
+                      Advanced Director
+                    </a>
+                  )}
+                  <Map size={19} />
+                </div>
+              </div>
+              {directorMaps.length === 0 ? (
+                <EmptyState text="No Director map data loaded." />
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Map</th>
+                        <th>Kind</th>
+                        <th>Players</th>
+                        <th>Queue</th>
+                        <th>Servers</th>
+                        <th>Override</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {directorMaps.map((map) => (
+                        <tr key={`${map.kind}-${map.name}`}>
+                          <td>
+                            <strong>{map.name}</strong>
+                          </td>
+                          <td>{map.kind}</td>
+                          <td>{map.players}</td>
+                          <td>{map.queued}</td>
+                          <td>{map.servers.length}</td>
+                          <td>{map.hasOverride ? "Yes" : "No"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            {directorProxyUrl && (
+              <section className="panel director-console">
+                <div className="panel-title">
+                  <h2>Advanced Director</h2>
+                  <ExternalLink size={19} />
+                </div>
+                <iframe title="Advanced Director" src={directorProxyUrl} />
+              </section>
+            )}
+          </>
         )}
 
         {managerToolsInstalled && (activeView === "overview" || activeView === "workloads") && (
