@@ -2,6 +2,7 @@ export type { BattleGroupDetail, BattleGroupSummary, ServerSetSummary } from "./
 export type { CommandFailure } from "./domain/common";
 export type {
   DirectorMapSummary,
+  DirectorPlayerLists,
   DirectorPlayerSummary,
   DirectorServerSummary,
   FlsDraft,

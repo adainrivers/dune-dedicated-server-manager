@@ -129,6 +129,7 @@ async fn main() -> Result<()> {
             "/api/director/players/summary",
             get(director_players_summary),
         )
+        .route("/api/director/players", get(director_players))
         .route("/api/director/maps", get(director_maps))
         .route(
             "/api/director/config/fls",
@@ -374,6 +375,27 @@ async fn director_players_summary(
     authorize(&state, &headers, None)?;
     let value = director_get_json(&state, "/v0/battlegroup").await?;
     Ok(Json(director_player_summary(&value)))
+}
+
+async fn director_players(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResponse<DirectorPlayerLists> {
+    authorize(&state, &headers, None)?;
+    let all = director_get_json(&state, "/v0/players").await?;
+    let online = director_get_json(&state, "/v0/players/online").await?;
+    let in_transit = director_get_json(&state, "/v0/players/intransit").await?;
+    let grace_period = director_get_json(&state, "/v0/players/graceperiod").await?;
+    let completion = director_get_json(&state, "/v0/players/completion").await?;
+    let queued = director_get_json(&state, "/v0/players/queued").await?;
+    Ok(Json(director_player_lists(
+        &all,
+        &online,
+        &in_transit,
+        &grace_period,
+        &completion,
+        &queued,
+    )))
 }
 
 async fn director_maps(

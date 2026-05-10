@@ -4,7 +4,8 @@ use crate::{
     clock::now_unix_ms,
     errors::ApiError,
     models::{
-        DirectorMapSummary, DirectorPathCapability, DirectorPlayerSummary, DirectorServerSummary,
+        DirectorMapSummary, DirectorPathCapability, DirectorPlayerLists, DirectorPlayerSummary,
+        DirectorServerSummary,
     },
 };
 
@@ -105,6 +106,52 @@ pub fn director_player_summary(value: &Value) -> DirectorPlayerSummary {
     summary
 }
 
+pub fn director_player_ids(value: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                if let Some(id) = player_id_from_value(item) {
+                    ids.push(id);
+                }
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values() {
+                if let Some(id) = player_id_from_value(item) {
+                    ids.push(id);
+                }
+            }
+        }
+        _ => {
+            if let Some(id) = player_id_from_value(value) {
+                ids.push(id);
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+pub fn director_player_lists(
+    all: &Value,
+    online: &Value,
+    in_transit: &Value,
+    grace_period: &Value,
+    completion: &Value,
+    queued: &Value,
+) -> DirectorPlayerLists {
+    DirectorPlayerLists {
+        all: director_player_ids(all),
+        online: director_player_ids(online),
+        in_transit: director_player_ids(in_transit),
+        grace_period: director_player_ids(grace_period),
+        completion: director_player_ids(completion),
+        queued: director_player_ids(queued),
+    }
+}
+
 pub fn director_map_summaries(value: &Value) -> Vec<DirectorMapSummary> {
     let mut maps = Vec::new();
     collect_director_maps(value, "singleServerMaps", "Single", &mut maps);
@@ -112,6 +159,18 @@ pub fn director_map_summaries(value: &Value) -> Vec<DirectorMapSummary> {
     collect_director_maps(value, "instancedMaps", "Instanced", &mut maps);
     maps.sort_by(|left, right| left.name.cmp(&right.name));
     maps
+}
+
+fn player_id_from_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Object(map) => ["playerId", "id", "characterId", "accountId"]
+            .iter()
+            .find_map(|key| map.get(*key).and_then(player_id_from_value)),
+        _ => None,
+    }
+    .filter(|value| !value.trim().is_empty())
 }
 
 fn collect_director_maps(
@@ -277,5 +336,27 @@ mod tests {
         ));
         assert!(!is_allowed_director_api("DELETE", "/v0/players"));
         assert!(!is_allowed_director_api("GET", "/v0/not-real"));
+    }
+
+    #[test]
+    fn normalizes_player_id_payloads() {
+        let value = json!([
+            "plain",
+            42,
+            { "playerId": "nested" },
+            { "characterId": "fallback" },
+            { "ignored": true },
+            "plain"
+        ]);
+
+        assert_eq!(
+            director_player_ids(&value),
+            vec![
+                "42".to_string(),
+                "fallback".to_string(),
+                "nested".to_string(),
+                "plain".to_string()
+            ]
+        );
     }
 }

@@ -14,7 +14,7 @@ export const defaultConfig: AppConfig = {
   managerApiDirectorUrl: ""
 };
 
-export const expectedManagerApiVersion = "0.1.1";
+export const expectedManagerApiVersion = "0.1.2";
 
 export function formatBytes(bytes: number) {
   if (!bytes) return "0 GB";

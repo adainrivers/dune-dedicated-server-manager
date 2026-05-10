@@ -39,6 +39,7 @@
 }
 
 .native-config-box,
+.native-detail-box,
 .runtime-map {
   padding: 12px;
   border: 1px solid rgba(217, 168, 87, 0.18);
@@ -171,6 +172,64 @@
 .subtle-line {
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.native-detail-box {
+  margin-top: 12px;
+}
+
+.native-tabs,
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.native-tabs {
+  margin-bottom: 10px;
+}
+
+.native-tabs button {
+  min-height: 34px;
+}
+
+.native-tabs button.active {
+  border-color: rgba(94, 216, 200, 0.68);
+  color: #061411;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.3), transparent 42%, rgba(0, 0, 0, 0.18) 43%),
+    linear-gradient(135deg, var(--teal-soft), var(--teal) 58%, var(--sand-hot));
+}
+
+.native-tabs button span {
+  color: inherit;
+  font-weight: 850;
+}
+
+.detail-toolbar {
+  margin-bottom: 10px;
+}
+
+.detail-toolbar input {
+  max-width: 320px;
+}
+
+.player-id-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.player-id-grid span {
+  max-width: none;
+  padding: 8px 10px;
+  border: 1px solid rgba(94, 216, 200, 0.16);
+  border-radius: 6px;
+  color: #dffcf8;
+  background: rgba(3, 7, 7, 0.58);
 }
 
 .director-starting svg {

@@ -23,6 +23,7 @@ import type {
   BattleGroupSummary,
   CommandFailure,
   DirectorMapSummary,
+  DirectorPlayerLists,
   DirectorPlayerSummary,
   FlsDraft,
   GuestConnection,
@@ -65,6 +66,7 @@ export default function App() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [managerInstall, setManagerInstall] = useState<ManagerApiInstallResult | null>(null);
   const [directorPlayers, setDirectorPlayers] = useState<DirectorPlayerSummary | null>(null);
+  const [directorPlayerLists, setDirectorPlayerLists] = useState<DirectorPlayerLists | null>(null);
   const [directorMaps, setDirectorMaps] = useState<DirectorMapSummary[]>([]);
   const [directorFlsConfig, setDirectorFlsConfig] = useState<Record<string, unknown> | null>(null);
   const [directorTransferConfig, setDirectorTransferConfig] = useState<Record<string, unknown> | null>(null);
@@ -186,6 +188,7 @@ export default function App() {
       setBattleGroupDetail(null);
       setWorkloads(null);
       setDirectorPlayers(null);
+      setDirectorPlayerLists(null);
       setDirectorMaps([]);
       setDirectorFlsConfig(null);
       setDirectorTransferConfig(null);
@@ -261,8 +264,9 @@ export default function App() {
 
   async function loadDirectorData() {
     setDirectorLoading(true);
-    const [players, maps, flsConfig, transferConfig] = await Promise.all([
+    const [players, playerLists, maps, flsConfig, transferConfig] = await Promise.all([
       capture("Director players", () => managerRequest<DirectorPlayerSummary>("/api/director/players/summary")),
+      capture("Director player lists", () => managerRequest<DirectorPlayerLists>("/api/director/players")),
       capture("Director maps", () => managerRequest<DirectorMapSummary[]>("/api/director/maps")),
       capture("Director FLS config", () => managerRequest<Record<string, unknown>>("/api/director/config/fls")),
       capture("Director character transfer config", () =>
@@ -270,6 +274,7 @@ export default function App() {
       )
     ]);
     if (players) setDirectorPlayers(players);
+    if (playerLists) setDirectorPlayerLists(playerLists);
     if (maps) setDirectorMaps(maps);
     if (flsConfig) setDirectorFlsConfig(flsConfig);
     if (transferConfig) setDirectorTransferConfig(transferConfig);
@@ -778,7 +783,7 @@ export default function App() {
         )}
 
         {directorAvailable && (activeView === "overview" || activeView === "players") && (
-          <PlayersPanel players={directorPlayers} />
+          <PlayersPanel players={directorPlayers} playerLists={directorPlayerLists} busy={busy} onReload={loadDirectorData} />
         )}
 
         {managerToolsInstalled && (activeView === "overview" || activeView === "battlegroups") && (

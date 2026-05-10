@@ -28,6 +28,17 @@ pub struct DirectorPlayerSummary {
     pub travel_requests_total: i64,
 }
 
+#[derive(Debug, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectorPlayerLists {
+    pub all: Vec<String>,
+    pub online: Vec<String>,
+    pub in_transit: Vec<String>,
+    pub grace_period: Vec<String>,
+    pub completion: Vec<String>,
+    pub queued: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirectorMapSummary {

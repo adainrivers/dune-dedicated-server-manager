@@ -9,6 +9,15 @@ export type DirectorPlayerSummary = {
   travelRequestsTotal: number;
 };
 
+export type DirectorPlayerLists = {
+  all: string[];
+  online: string[];
+  inTransit: string[];
+  gracePeriod: string[];
+  completion: string[];
+  queued: string[];
+};
+
 export type DirectorServerSummary = {
   label: string;
   serverId: string;
