@@ -571,10 +571,6 @@ export default function App() {
     setBusy(true);
     setErrors([]);
     setSnapshotPath("");
-    const nextManagerStatus = managerApiConfigured
-      ? await capture("Manager API status", () => managerRequest<ManagerApiStatus>("/api/status"))
-      : null;
-    setManagerStatus(nextManagerStatus);
 
     const nextHost = await capture("Host status", () => invoke<HostStatus>("get_host_status"));
     setHost(nextHost);
@@ -582,7 +578,30 @@ export default function App() {
     const nextVm = await capture("VM status", () => invoke<VmStatus>("get_vm_status", { vmName: config.vmName }));
     setVm(nextVm);
 
+    const nextVmState = nextVm?.state.toLowerCase() ?? "";
+    if (nextVmState !== "running") {
+      setGuest(null);
+      setManagerStatus(null);
+      setManagerTelemetry(null);
+      setBattleGroups([]);
+      setBattleGroupDetail(null);
+      setWorkloads(null);
+      setDirectorPlayers(null);
+      setDirectorMaps([]);
+      setDirectorFlsConfig(null);
+      setDirectorTransferConfig(null);
+      setBusy(false);
+      return;
+    }
+
     const ip = nextVm?.ipAddresses?.[0] ?? guest?.ip ?? config.vmIp;
+    if (!ip) {
+      setGuest(null);
+      setManagerStatus(null);
+      setBusy(false);
+      return;
+    }
+
     const nextGuest = await capture("Guest connection", () =>
       invoke<GuestConnection>("connect_guest", { installPath: config.installPath, ip, sshUser: config.sshUser })
     );
@@ -592,6 +611,11 @@ export default function App() {
       setConfig(updatedConfig);
       void invoke<AppConfig>("save_app_config", { config: updatedConfig });
     }
+
+    const nextManagerStatus = managerApiConfigured
+      ? await capture("Manager API status", () => managerRequest<ManagerApiStatus>("/api/status"))
+      : null;
+    setManagerStatus(nextManagerStatus);
 
     let nextBattleGroups = managerApiConfigured
       ? await capture("Manager BattleGroups", () => managerRequest<BattleGroupSummary[]>("/api/battlegroups"))
@@ -1117,6 +1141,23 @@ export default function App() {
                 {error.stderr && <pre>{error.stderr}</pre>}
               </div>
             ))}
+          </section>
+        )}
+
+        {vm && !vmIsRunning && (
+          <section className="tool-required panel">
+            <div>
+              <HardDrive size={24} />
+              <h2>VM must be running</h2>
+            </div>
+            <p>
+              Guest SSH, Manager API, BattleGroups, Director telemetry, and logs are skipped until Hyper-V reports the
+              VM state as Running and an IP address is available.
+            </p>
+            <button onClick={startVm} disabled={busy || !canControlVm || vmIsRunning || vmIsChanging}>
+              <Play size={16} />
+              Start VM
+            </button>
           </section>
         )}
 
