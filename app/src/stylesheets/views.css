@@ -173,3 +173,93 @@
   overflow-wrap: anywhere;
 }
 
+.director-starting svg {
+  animation: spin 1.2s linear infinite;
+}
+
+.config-preview,
+.log-output {
+  width: 100%;
+  border: 1px solid rgba(94, 216, 200, 0.18);
+  border-radius: 7px;
+  color: #dffcf8;
+  background:
+    linear-gradient(180deg, rgba(94, 216, 200, 0.055), rgba(0, 0, 0, 0.2)),
+    rgba(3, 7, 7, 0.78);
+  font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  font-size: 14px;
+}
+
+.config-preview {
+  max-height: 240px;
+  margin-top: 10px;
+}
+
+.log-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.8fr) 110px minmax(180px, 1fr) auto auto auto;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.log-controls label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.log-controls .inline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+}
+
+.log-output {
+  min-height: 380px;
+  max-height: 560px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 0;
+  white-space: normal;
+}
+
+.empty-log {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.log-line {
+  display: block;
+  min-height: 20px;
+  padding: 1px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.log-line:hover {
+  background: rgba(255, 232, 170, 0.045);
+}
+
+.log-severity-error {
+  color: #ff9b8f;
+}
+
+.log-severity-warning {
+  color: #ffbd4d;
+}
+
+.log-severity-info {
+  color: #a8f4e9;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+

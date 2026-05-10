@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppHeader, AppSidebar, StatusStrip } from "./components/appShell";
 import { useDashboardDerivedState } from "./hooks/useDashboardDerivedState";
 import { useManagerTelemetry } from "./hooks/useManagerTelemetry";
@@ -8,7 +8,12 @@ import { ConfigView } from "./views/config";
 import { DirectorView } from "./views/director";
 import { EnvironmentPanel } from "./views/environment";
 import { HostVmPanels, VmRequiredNotice } from "./views/hostVm";
-import { DirectorUnavailableNotice, ManagerApiPanel, ManagerToolsRequiredNotice } from "./views/managerApi";
+import {
+  DirectorStartingNotice,
+  DirectorUnavailableNotice,
+  ManagerApiPanel,
+  ManagerToolsRequiredNotice
+} from "./views/managerApi";
 import { LogsPanel } from "./views/logs";
 import { PlayersPanel } from "./views/players";
 import { WorkloadsPanel } from "./views/workloads";
@@ -24,6 +29,7 @@ import type {
   HostStatus,
   ManagerApiInstallResult,
   ManagerApiStatus,
+  ManagerLogResponse,
   ManagerWorkloads,
   MapOverrideDraft,
   TransferDraft,
@@ -39,7 +45,8 @@ import {
   generateToken,
   managerWorkloadsToUi,
   nullableNumber,
-  numberAt
+  numberAt,
+  valueAt
 } from "./utils";
 
 export default function App() {
@@ -61,6 +68,7 @@ export default function App() {
   const [directorMaps, setDirectorMaps] = useState<DirectorMapSummary[]>([]);
   const [directorFlsConfig, setDirectorFlsConfig] = useState<Record<string, unknown> | null>(null);
   const [directorTransferConfig, setDirectorTransferConfig] = useState<Record<string, unknown> | null>(null);
+  const [directorLoading, setDirectorLoading] = useState(false);
   const [selectedDirectorMap, setSelectedDirectorMap] = useState("");
   const [flsDraft, setFlsDraft] = useState<FlsDraft>({ heartbeatSeconds: "", settingsSeconds: "" });
   const [transferDraft, setTransferDraft] = useState<TransferDraft>({
@@ -252,6 +260,7 @@ export default function App() {
   }
 
   async function loadDirectorData() {
+    setDirectorLoading(true);
     const [players, maps, flsConfig, transferConfig] = await Promise.all([
       capture("Director players", () => managerRequest<DirectorPlayerSummary>("/api/director/players/summary")),
       capture("Director maps", () => managerRequest<DirectorMapSummary[]>("/api/director/maps")),
@@ -264,6 +273,99 @@ export default function App() {
     if (maps) setDirectorMaps(maps);
     if (flsConfig) setDirectorFlsConfig(flsConfig);
     if (transferConfig) setDirectorTransferConfig(transferConfig);
+    setDirectorLoading(false);
+  }
+
+  function buildFlsPayload() {
+    if (!flsDraft.heartbeatSeconds || !flsDraft.settingsSeconds) return null;
+    return {
+      FlsServerHeartbeatUpdateFrequencySeconds: Number(flsDraft.heartbeatSeconds),
+      FlsServerSettingsUpdateFrequencySeconds: Number(flsDraft.settingsSeconds)
+    };
+  }
+
+  function buildCurrentFlsPayload() {
+    if (!directorFlsConfig) return null;
+    return {
+      FlsServerHeartbeatUpdateFrequencySeconds: Number(
+        valueAt(directorFlsConfig, ["config", "flsServerHeartbeatUpdateFrequencySeconds"])
+      ),
+      FlsServerSettingsUpdateFrequencySeconds: Number(
+        valueAt(directorFlsConfig, ["config", "flsServerSettingsUpdateFrequencySeconds"])
+      )
+    };
+  }
+
+  function buildTransferPayload() {
+    if (!transferDraft.exportTimeout || !transferDraft.importTimeout || !transferDraft.validateTimeout) return null;
+    return {
+      ShouldDeleteOriginCharactersDuringTransfers: transferDraft.deleteOrigin,
+      IncomingCharacterTransfers: Number(transferDraft.incoming),
+      AcceptOutgoingCharacterTransfers: transferDraft.outgoing,
+      ExportCharacterTimeout: Number(transferDraft.exportTimeout),
+      ImportCharacterTimeout: Number(transferDraft.importTimeout),
+      FreeToTransferCharactersFrom: transferDraft.freeFrom,
+      FreeToTransferCharactersTo: transferDraft.freeTo,
+      ValidateBeforeImportCharacterTimeout: Number(transferDraft.validateTimeout),
+      ForceIsWorldClosed: transferDraft.worldClosed,
+      ForceIsWorldClosingSoon: transferDraft.worldClosingSoon
+    };
+  }
+
+  function buildCurrentTransferPayload() {
+    if (!directorTransferConfig) return null;
+    return {
+      ShouldDeleteOriginCharactersDuringTransfers: boolAt(
+        directorTransferConfig,
+        ["config", "shouldDeleteOriginCharactersDuringTransfers"],
+        true
+      ),
+      IncomingCharacterTransfers: Number(valueAt(directorTransferConfig, ["config", "incomingCharacterTransfers"])),
+      AcceptOutgoingCharacterTransfers: boolAt(directorTransferConfig, ["config", "acceptOutgoingCharacterTransfers"]),
+      ExportCharacterTimeout: Number(valueAt(directorTransferConfig, ["config", "exportCharacterTimeout"])),
+      ImportCharacterTimeout: Number(valueAt(directorTransferConfig, ["config", "importCharacterTimeout"])),
+      FreeToTransferCharactersFrom: boolAt(directorTransferConfig, ["config", "freeToTransferCharactersFrom"]),
+      FreeToTransferCharactersTo: boolAt(directorTransferConfig, ["config", "freeToTransferCharactersTo"]),
+      ValidateBeforeImportCharacterTimeout: Number(
+        valueAt(directorTransferConfig, ["config", "validateBeforeImportCharacterTimeout"])
+      ),
+      ForceIsWorldClosed: boolAt(directorTransferConfig, ["config", "forceIsWorldClosed"]),
+      ForceIsWorldClosingSoon: boolAt(directorTransferConfig, ["config", "forceIsWorldClosingSoon"])
+    };
+  }
+
+  function buildMapOverridePayload() {
+    if (!selectedDirectorMapSummary) return null;
+    const mapName = selectedDirectorMapSummary.name;
+    return selectedDirectorMapSummary.kind === "Dimension"
+      ? {
+          MapName: mapName,
+          DimensionServerGroupConfig: {
+            EnforceSameHomeDimensionForAll: mapOverrideDraft.enforceSameHomeDimension,
+            PlayerHardCap: nullableNumber(mapOverrideDraft.playerHardCap),
+            ShouldUpdatePlayerCountOnFls: mapOverrideDraft.updatePlayerCountOnFls,
+            DimensionOverrides: null
+          }
+        }
+      : selectedDirectorMapSummary.kind === "Instanced"
+        ? {
+            MapName: mapName,
+            ClassicalInstancingGroupConfig: {
+              PlayerHardCap: nullableNumber(mapOverrideDraft.playerHardCap),
+              ShouldUpdatePlayerCountOnFls: mapOverrideDraft.updatePlayerCountOnFls,
+              EnableAutomaticInstanceScaling: mapOverrideDraft.automaticScaling,
+              InstanceScalingThrottlingSeconds: nullableNumber(mapOverrideDraft.throttlingSeconds),
+              MinServers: nullableNumber(mapOverrideDraft.minServers),
+              NumExtraServers: nullableNumber(mapOverrideDraft.extraServers)
+            }
+          }
+        : {
+            MapName: mapName,
+            SingleServerConfig: {
+              PlayerHardCap: nullableNumber(mapOverrideDraft.playerHardCap),
+              ShouldUpdatePlayerCountOnFls: mapOverrideDraft.updatePlayerCountOnFls
+            }
+          };
   }
 
   async function saveFlsConfig() {
@@ -272,10 +374,7 @@ export default function App() {
       managerRequest<Record<string, unknown>>("/api/director/config/fls", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          FlsServerHeartbeatUpdateFrequencySeconds: Number(flsDraft.heartbeatSeconds),
-          FlsServerSettingsUpdateFrequencySeconds: Number(flsDraft.settingsSeconds)
-        })
+        body: JSON.stringify(buildFlsPayload())
       })
     );
     await loadDirectorData();
@@ -297,18 +396,7 @@ export default function App() {
       managerRequest<Record<string, unknown>>("/api/director/config/character-transfer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ShouldDeleteOriginCharactersDuringTransfers: transferDraft.deleteOrigin,
-          IncomingCharacterTransfers: Number(transferDraft.incoming),
-          AcceptOutgoingCharacterTransfers: transferDraft.outgoing,
-          ExportCharacterTimeout: Number(transferDraft.exportTimeout),
-          ImportCharacterTimeout: Number(transferDraft.importTimeout),
-          FreeToTransferCharactersFrom: transferDraft.freeFrom,
-          FreeToTransferCharactersTo: transferDraft.freeTo,
-          ValidateBeforeImportCharacterTimeout: Number(transferDraft.validateTimeout),
-          ForceIsWorldClosed: transferDraft.worldClosed,
-          ForceIsWorldClosingSoon: transferDraft.worldClosingSoon
-        })
+        body: JSON.stringify(buildTransferPayload())
       })
     );
     await loadDirectorData();
@@ -327,36 +415,7 @@ export default function App() {
   async function saveMapOverride() {
     if (!selectedDirectorMapSummary) return;
     const mapName = selectedDirectorMapSummary.name;
-    const config =
-      selectedDirectorMapSummary.kind === "Dimension"
-        ? {
-            MapName: mapName,
-            DimensionServerGroupConfig: {
-              EnforceSameHomeDimensionForAll: mapOverrideDraft.enforceSameHomeDimension,
-              PlayerHardCap: nullableNumber(mapOverrideDraft.playerHardCap),
-              ShouldUpdatePlayerCountOnFls: mapOverrideDraft.updatePlayerCountOnFls,
-              DimensionOverrides: null
-            }
-          }
-        : selectedDirectorMapSummary.kind === "Instanced"
-          ? {
-              MapName: mapName,
-              ClassicalInstancingGroupConfig: {
-                PlayerHardCap: nullableNumber(mapOverrideDraft.playerHardCap),
-                ShouldUpdatePlayerCountOnFls: mapOverrideDraft.updatePlayerCountOnFls,
-                EnableAutomaticInstanceScaling: mapOverrideDraft.automaticScaling,
-                InstanceScalingThrottlingSeconds: nullableNumber(mapOverrideDraft.throttlingSeconds),
-                MinServers: nullableNumber(mapOverrideDraft.minServers),
-                NumExtraServers: nullableNumber(mapOverrideDraft.extraServers)
-              }
-            }
-          : {
-              MapName: mapName,
-              SingleServerConfig: {
-                PlayerHardCap: nullableNumber(mapOverrideDraft.playerHardCap),
-                ShouldUpdatePlayerCountOnFls: mapOverrideDraft.updatePlayerCountOnFls
-              }
-            };
+    const config = buildMapOverridePayload();
 
     setBusy(true);
     await capture("Update Director map override", () =>
@@ -482,6 +541,24 @@ export default function App() {
     setBusy(false);
   }
 
+  async function loadLogs(pod: string, container: string, tail: number) {
+    const query = new URLSearchParams({ pod, tail: String(tail) });
+    if (container) query.set("container", container);
+    return capture("Load logs", () => managerRequest<ManagerLogResponse>(`/api/logs?${query.toString()}`));
+  }
+
+  function backupConfig(name: string, value: unknown) {
+    if (!value) return;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${name}-${stamp}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function saveConfig(nextConfig = config) {
     setBusy(true);
     const saved = await capture("Save config", () => invoke<AppConfig>("save_app_config", { config: nextConfig }));
@@ -589,6 +666,18 @@ export default function App() {
 
   const pods = workloads?.pods.items ?? [];
   const services = workloads?.services.items ?? [];
+  const flsPreview = useMemo(() => buildFlsPayload(), [flsDraft]);
+  const transferPreview = useMemo(() => buildTransferPayload(), [transferDraft]);
+  const currentFlsPayload = useMemo(() => buildCurrentFlsPayload(), [directorFlsConfig]);
+  const currentTransferPayload = useMemo(() => buildCurrentTransferPayload(), [directorTransferConfig]);
+  const flsChanged = Boolean(flsPreview && JSON.stringify(flsPreview) !== JSON.stringify(currentFlsPayload));
+  const transferChanged = Boolean(
+    transferPreview && JSON.stringify(transferPreview) !== JSON.stringify(currentTransferPayload)
+  );
+  const mapOverridePreview = useMemo(
+    () => buildMapOverridePayload(),
+    [selectedDirectorMapSummary, mapOverrideDraft]
+  );
 
   return (
     <main className="app-shell">
@@ -680,7 +769,11 @@ export default function App() {
           />
         )}
 
-        {managerToolsInstalled && !directorAvailable && (activeView === "overview" || activeView === "manager") && (
+        {directorLoading && (activeView === "overview" || activeView === "manager" || activeViewRequiresDirector) && (
+          <DirectorStartingNotice />
+        )}
+
+        {managerToolsInstalled && !directorAvailable && !directorLoading && (activeView === "overview" || activeView === "manager") && (
           <DirectorUnavailableNotice busy={busy} onRefresh={refresh} />
         )}
 
@@ -731,6 +824,12 @@ export default function App() {
             onSelectMap={setSelectedDirectorMap}
             onSaveMapOverride={saveMapOverride}
             onClearMapOverride={clearMapOverride}
+            flsPreview={flsPreview}
+            transferPreview={transferPreview}
+            flsChanged={flsChanged}
+            transferChanged={transferChanged}
+            mapOverridePreview={mapOverridePreview}
+            onBackupConfig={backupConfig}
           />
         )}
 
@@ -752,7 +851,7 @@ export default function App() {
         )}
 
         {managerToolsInstalled && activeView === "logs" && (
-          <LogsPanel />
+          <LogsPanel pods={pods} busy={busy} onLoadLogs={loadLogs} />
         )}
       </section>
     </main>

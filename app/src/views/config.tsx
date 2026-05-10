@@ -30,6 +30,12 @@ type ConfigViewProps = {
   onSelectMap: (mapName: string) => void;
   onSaveMapOverride: () => void;
   onClearMapOverride: (mapName: string) => void;
+  flsPreview: Record<string, unknown> | null;
+  transferPreview: Record<string, unknown> | null;
+  flsChanged: boolean;
+  transferChanged: boolean;
+  mapOverridePreview: Record<string, unknown> | null;
+  onBackupConfig: (name: string, value: unknown) => void;
 };
 
 export function ConfigView({
@@ -52,7 +58,13 @@ export function ConfigView({
   onClearTransferConfig,
   onSelectMap,
   onSaveMapOverride,
-  onClearMapOverride
+  onClearMapOverride,
+  flsPreview,
+  transferPreview,
+  flsChanged,
+  transferChanged,
+  mapOverridePreview,
+  onBackupConfig
 }: ConfigViewProps) {
   return (
     <>
@@ -70,6 +82,11 @@ export function ConfigView({
           onClearFlsConfig={onClearFlsConfig}
           onSaveTransferConfig={onSaveTransferConfig}
           onClearTransferConfig={onClearTransferConfig}
+          flsPreview={flsPreview}
+          transferPreview={transferPreview}
+          flsChanged={flsChanged}
+          transferChanged={transferChanged}
+          onBackupConfig={onBackupConfig}
         />
       )}
       {directorAvailable && selectedDirectorMapSummary && (
@@ -82,6 +99,8 @@ export function ConfigView({
           onMapOverrideDraftChange={onMapOverrideDraftChange}
           onSaveMapOverride={onSaveMapOverride}
           onClearMapOverride={onClearMapOverride}
+          preview={mapOverridePreview}
+          onBackupConfig={onBackupConfig}
         />
       )}
     </>

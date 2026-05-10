@@ -13,6 +13,7 @@ export type {
   KubeItem,
   ManagerApiInstallResult,
   ManagerApiStatus,
+  ManagerLogResponse,
   ManagerPodSummary,
   ManagerServicePortSummary,
   ManagerServiceSummary,

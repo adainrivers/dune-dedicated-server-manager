@@ -37,7 +37,7 @@ pub fn director_capabilities_list() -> Vec<DirectorPathCapability> {
 pub fn is_allowed_director_api(method: &str, path: &str) -> bool {
     director_capabilities_list()
         .iter()
-        .any(|item| item.method == method && item.path == path)
+        .any(|item| item.method.eq_ignore_ascii_case(method) && item.path == path)
 }
 
 pub fn query_token(query: Option<&str>) -> Option<&str> {
@@ -222,4 +222,60 @@ fn director_server_summary(value: &Value) -> DirectorServerSummary {
 
 fn value_i64(value: &Value, key: &str) -> i64 {
     value.get(key).and_then(Value::as_i64).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn summarizes_players_across_all_map_groups() {
+        let value = json!({
+            "singleServerMaps": {
+                "Arrakeen": {
+                    "partition": { "serverId": "single" },
+                    "numPlayersInGame": 2,
+                    "numPlayersOnline": 1,
+                    "numPlayersInQueue": 3
+                }
+            },
+            "dimensionMaps": {
+                "DeepDesert": {
+                    "serversByDimension": {
+                        "0": {
+                            "partition": { "serverId": "dimension" },
+                            "numPlayersInGame": 6,
+                            "numPlayersOnline": 5,
+                            "numPlayersInQueue": 4
+                        }
+                    }
+                }
+            },
+            "numLoginRequestsTotal": 10,
+            "numTravelRequestsTotal": 11
+        });
+
+        let summary = director_player_summary(&value);
+
+        assert_eq!(summary.active, 8);
+        assert_eq!(summary.online, 6);
+        assert_eq!(summary.queued, 7);
+        assert_eq!(summary.in_transit, 0);
+        assert_eq!(summary.grace_period, 0);
+        assert_eq!(summary.completion, 0);
+        assert_eq!(summary.login_requests_total, 10);
+        assert_eq!(summary.travel_requests_total, 11);
+    }
+
+    #[test]
+    fn allowlist_rejects_unknown_director_routes() {
+        assert!(is_allowed_director_api("GET", "/v0/players"));
+        assert!(is_allowed_director_api(
+            "post",
+            "/v0/BattlegroupUpdateFlsReportSettings"
+        ));
+        assert!(!is_allowed_director_api("DELETE", "/v0/players"));
+        assert!(!is_allowed_director_api("GET", "/v0/not-real"));
+    }
 }

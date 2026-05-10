@@ -13,6 +13,11 @@ export type DirectorConfigPanelProps = {
   onClearFlsConfig: () => void;
   onSaveTransferConfig: () => void;
   onClearTransferConfig: () => void;
+  flsPreview: Record<string, unknown> | null;
+  transferPreview: Record<string, unknown> | null;
+  flsChanged: boolean;
+  transferChanged: boolean;
+  onBackupConfig: (name: string, value: unknown) => void;
 };
 
 export function DirectorConfigPanel({
@@ -26,7 +31,12 @@ export function DirectorConfigPanel({
   onSaveFlsConfig,
   onClearFlsConfig,
   onSaveTransferConfig,
-  onClearTransferConfig
+  onClearTransferConfig,
+  flsPreview,
+  transferPreview,
+  flsChanged,
+  transferChanged,
+  onBackupConfig
 }: DirectorConfigPanelProps) {
   return (
     <section className="panel">
@@ -38,7 +48,10 @@ export function DirectorConfigPanel({
         <div className="native-config-box">
           <div className="mini-title">
             <strong>FLS Report Settings</strong>
-            <span>{directorFlsConfig?.webOverrideConfig ? "Override active" : "Base config"}</span>
+            <span>
+              {directorFlsConfig?.webOverrideConfig ? "Override active" : "Base config"} /{" "}
+              {flsChanged ? "Pending changes" : "No changes"}
+            </span>
           </div>
           <label>
             Heartbeat update seconds
@@ -59,6 +72,9 @@ export function DirectorConfigPanel({
             />
           </label>
           <div className="button-row">
+            <button onClick={() => onBackupConfig("director-fls-config", directorFlsConfig)} disabled={!directorFlsConfig}>
+              Backup
+            </button>
             <button onClick={onSaveFlsConfig} disabled={busy || !flsDraft.heartbeatSeconds || !flsDraft.settingsSeconds}>
               Update
             </button>
@@ -66,12 +82,16 @@ export function DirectorConfigPanel({
               Clear Override
             </button>
           </div>
+          <pre className="config-preview">{JSON.stringify(flsPreview, null, 2)}</pre>
         </div>
 
         <div className="native-config-box">
           <div className="mini-title">
             <strong>Character Transfer</strong>
-            <span>{directorTransferConfig?.webOverrideConfig ? "Override active" : "Base config"}</span>
+            <span>
+              {directorTransferConfig?.webOverrideConfig ? "Override active" : "Base config"} /{" "}
+              {transferChanged ? "Pending changes" : "No changes"}
+            </span>
           </div>
           <div className="form-grid">
             <label>
@@ -125,6 +145,12 @@ export function DirectorConfigPanel({
           </div>
           <div className="button-row">
             <button
+              onClick={() => onBackupConfig("director-character-transfer-config", directorTransferConfig)}
+              disabled={!directorTransferConfig}
+            >
+              Backup
+            </button>
+            <button
               onClick={onSaveTransferConfig}
               disabled={busy || !transferDraft.exportTimeout || !transferDraft.importTimeout || !transferDraft.validateTimeout}
             >
@@ -134,6 +160,7 @@ export function DirectorConfigPanel({
               Clear Override
             </button>
           </div>
+          <pre className="config-preview">{JSON.stringify(transferPreview, null, 2)}</pre>
         </div>
       </section>
     </section>

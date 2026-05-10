@@ -10,6 +10,8 @@ export type MapOverridePanelProps = {
   onMapOverrideDraftChange: (draft: MapOverrideDraft) => void;
   onSaveMapOverride: () => void;
   onClearMapOverride: (mapName: string) => void;
+  preview: Record<string, unknown> | null;
+  onBackupConfig: (name: string, value: unknown) => void;
 };
 
 export function MapOverridePanel({
@@ -20,7 +22,9 @@ export function MapOverridePanel({
   onSelectMap,
   onMapOverrideDraftChange,
   onSaveMapOverride,
-  onClearMapOverride
+  onClearMapOverride,
+  preview,
+  onBackupConfig
 }: MapOverridePanelProps) {
   if (!selectedDirectorMapSummary) return null;
 
@@ -126,6 +130,12 @@ export function MapOverridePanel({
           )}
         </div>
         <div className="button-row">
+          <button
+            onClick={() => onBackupConfig(`${selectedDirectorMapSummary.name}-map-summary`, selectedDirectorMapSummary)}
+            disabled={!selectedDirectorMapSummary}
+          >
+            Backup
+          </button>
           <button onClick={onSaveMapOverride} disabled={busy}>
             Update Override
           </button>
@@ -136,6 +146,7 @@ export function MapOverridePanel({
             Clear Override
           </button>
         </div>
+        <pre className="config-preview">{JSON.stringify(preview, null, 2)}</pre>
       </section>
     </section>
   );

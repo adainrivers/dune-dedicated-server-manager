@@ -14,6 +14,8 @@ export const defaultConfig: AppConfig = {
   managerApiDirectorUrl: ""
 };
 
+export const expectedManagerApiVersion = "0.1.1";
+
 export function formatBytes(bytes: number) {
   if (!bytes) return "0 GB";
   return `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
@@ -80,7 +82,7 @@ export function managerWorkloadsToUi(value: ManagerWorkloads): Workloads {
     pods: {
       items: value.pods.map((pod) => ({
         metadata: { name: pod.name, creationTimestamp: pod.createdAt ?? undefined },
-        status: { phase: pod.phase, ready: pod.ready, restarts: pod.restarts }
+        status: { phase: pod.phase, ready: pod.ready, restarts: pod.restarts, containers: pod.containers ?? [] }
       }))
     },
     services: {

@@ -50,6 +50,7 @@ use state::AppState;
 use validation::{validate_kube_name, validate_namespace};
 
 const DEFAULT_PORT: u16 = 8787;
+const MANAGER_API_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -179,9 +180,17 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
+fn audit_action(action: &str, target: Option<&str>) {
+    match target {
+        Some(target) => info!(target: "audit", action, target, "mutating manager action"),
+        None => info!(target: "audit", action, "mutating manager action"),
+    }
+}
+
 async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         ok: true,
+        api_version: MANAGER_API_VERSION,
         namespace: state.namespace.clone(),
         auth_enabled: state.token.is_some(),
         director_configured: state.director_base_url.is_some(),
@@ -199,6 +208,7 @@ async fn status(
     let director_configured = resolve_director_base_url(&state).await.is_ok();
 
     Ok(Json(StatusResponse {
+        api_version: MANAGER_API_VERSION,
         namespace: state.namespace.clone(),
         auth_enabled: state.token.is_some(),
         director_configured,
@@ -247,6 +257,7 @@ async fn start_battlegroup(
     Path((namespace, name)): Path<(String, String)>,
 ) -> ApiResponse<BattleGroupDetail> {
     authorize(&state, &headers, None)?;
+    audit_action("battlegroup.start", Some(&format!("{namespace}/{name}")));
     patch_battlegroup_stop(&state, &namespace, &name, false).await?;
     let item = get_battlegroup_object(&state, &name).await?;
     Ok(Json(battlegroup_detail_from_object(&state.namespace, item)))
@@ -258,6 +269,7 @@ async fn stop_battlegroup(
     Path((namespace, name)): Path<(String, String)>,
 ) -> ApiResponse<BattleGroupDetail> {
     authorize(&state, &headers, None)?;
+    audit_action("battlegroup.stop", Some(&format!("{namespace}/{name}")));
     patch_battlegroup_stop(&state, &namespace, &name, true).await?;
     let item = get_battlegroup_object(&state, &name).await?;
     Ok(Json(battlegroup_detail_from_object(&state.namespace, item)))
@@ -269,6 +281,7 @@ async fn restart_battlegroup(
     Path((namespace, name)): Path<(String, String)>,
 ) -> ApiResponse<BattleGroupDetail> {
     authorize(&state, &headers, None)?;
+    audit_action("battlegroup.restart", Some(&format!("{namespace}/{name}")));
     patch_battlegroup_stop(&state, &namespace, &name, true).await?;
     time::sleep(Duration::from_secs(5)).await;
     patch_battlegroup_stop(&state, &namespace, &name, false).await?;
@@ -387,6 +400,7 @@ async fn director_update_fls_config(
     body: Bytes,
 ) -> ApiResponse<Value> {
     authorize(&state, &headers, None)?;
+    audit_action("director.fls.update", None);
     proxy_director_json(
         &state,
         Method::POST,
@@ -402,6 +416,7 @@ async fn director_clear_fls_config(
     headers: HeaderMap,
 ) -> ApiResponse<Value> {
     authorize(&state, &headers, None)?;
+    audit_action("director.fls.clear", None);
     proxy_director_json(
         &state,
         Method::POST,
@@ -427,6 +442,7 @@ async fn director_update_character_transfer_config(
     body: Bytes,
 ) -> ApiResponse<Value> {
     authorize(&state, &headers, None)?;
+    audit_action("director.character_transfer.update", None);
     proxy_director_json(
         &state,
         Method::POST,
@@ -442,6 +458,7 @@ async fn director_clear_character_transfer_config(
     headers: HeaderMap,
 ) -> ApiResponse<Value> {
     authorize(&state, &headers, None)?;
+    audit_action("director.character_transfer.clear", None);
     proxy_director_json(
         &state,
         Method::POST,
@@ -460,6 +477,7 @@ async fn director_update_map_override(
 ) -> ApiResponse<Value> {
     authorize(&state, &headers, None)?;
     validate_director_map_name(&map_name)?;
+    audit_action("director.map_override.update", Some(&map_name));
     proxy_director_json(
         &state,
         Method::POST,
@@ -477,6 +495,7 @@ async fn director_clear_map_override(
 ) -> ApiResponse<Value> {
     authorize(&state, &headers, None)?;
     validate_director_map_name(&map_name)?;
+    audit_action("director.map_override.clear", Some(&map_name));
     proxy_director_json(
         &state,
         Method::POST,

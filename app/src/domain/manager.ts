@@ -22,6 +22,7 @@ export type ManagerPodSummary = {
   phase: string;
   ready: boolean;
   restarts: number;
+  containers: string[];
   nodeName?: string | null;
   createdAt?: string | null;
 };
@@ -48,12 +49,19 @@ export type ManagerWorkloads = {
 };
 
 export type ManagerApiStatus = {
+  apiVersion: string;
   namespace: string;
   authEnabled: boolean;
   directorConfigured: boolean;
   battlegroups: number;
   pods: number;
   services: number;
+};
+
+export type ManagerLogResponse = {
+  pod: string;
+  container?: string | null;
+  lines: string[];
 };
 
 export type TelemetryEnvelope = {

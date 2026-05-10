@@ -1,6 +1,7 @@
 import { Map, PackagePlus, RadioTower, RefreshCw } from "lucide-react";
 import { InfoRow } from "../components/primitives";
 import type { AppConfig, ManagerApiInstallResult, ManagerApiStatus, TelemetryEnvelope } from "../types";
+import { expectedManagerApiVersion } from "../utils";
 
 type ManagerApiPanelProps = {
   config: AppConfig;
@@ -29,6 +30,13 @@ export function ManagerApiPanel({
   canInstallManagerApi,
   onInstall
 }: ManagerApiPanelProps) {
+  const toolFreshness = !managerStatus
+    ? "Unknown"
+    : !managerStatus.apiVersion
+      ? "Update recommended"
+      : managerStatus.apiVersion === expectedManagerApiVersion
+      ? "Current"
+      : `Update available (${managerStatus.apiVersion} -> ${expectedManagerApiVersion})`;
   return (
     <section className="panel">
       <div className="panel-title">
@@ -36,7 +44,7 @@ export function ManagerApiPanel({
         <div className="button-row">
           <button onClick={onInstall} disabled={busy || !canInstallManagerApi}>
             <PackagePlus size={16} />
-            Install Tool
+            {managerStatus ? "Update Tool" : "Install Tool"}
           </button>
           <RadioTower size={19} />
         </div>
@@ -46,6 +54,8 @@ export function ManagerApiPanel({
         <InfoRow label="Install namespace" value={managerInstallNamespace || "Not configured"} />
         <InfoRow label="Binary" value={config.managerApiBinaryPath || "Not configured"} />
         <InfoRow label="API" value={managerReadiness} />
+        <InfoRow label="Tool version" value={managerStatus?.apiVersion ?? "Unknown"} />
+        <InfoRow label="Tool freshness" value={toolFreshness} />
         <InfoRow label="Telemetry socket" value={managerTelemetryState} />
         <InfoRow label="Namespace" value={managerStatus?.namespace} />
         <InfoRow label="Director bridge" value={managerStatus?.directorConfigured ? "Configured" : "Unavailable"} />
@@ -127,6 +137,21 @@ export function DirectorUnavailableNotice({ busy, onRefresh }: DirectorUnavailab
         <RefreshCw size={16} />
         Refresh
       </button>
+    </section>
+  );
+}
+
+export function DirectorStartingNotice() {
+  return (
+    <section className="tool-required panel director-starting">
+      <div>
+        <RefreshCw size={24} />
+        <h2>Director is starting</h2>
+      </div>
+      <p>
+        The Manager API is bringing the battlegroup online so the Director service can answer telemetry and config
+        requests.
+      </p>
     </section>
   );
 }

@@ -31,6 +31,16 @@ pub async fn list_pods(state: &AppState) -> Result<Vec<PodSummary>> {
         .into_iter()
         .map(|pod| {
             let status = pod.status.unwrap_or_default();
+            let containers = pod
+                .spec
+                .as_ref()
+                .map(|spec| {
+                    spec.containers
+                        .iter()
+                        .map(|container| container.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
             let container_statuses = status.container_statuses.unwrap_or_default();
             PodSummary {
                 name: pod.metadata.name.unwrap_or_default(),
@@ -41,6 +51,7 @@ pub async fn list_pods(state: &AppState) -> Result<Vec<PodSummary>> {
                     .iter()
                     .map(|container| container.restart_count)
                     .sum(),
+                containers,
                 node_name: pod.spec.and_then(|spec| spec.node_name),
                 created_at: pod
                     .metadata

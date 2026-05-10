@@ -7,6 +7,7 @@ pub struct PodSummary {
     pub phase: String,
     pub ready: bool,
     pub restarts: i32,
+    pub containers: Vec<String>,
     pub node_name: Option<String>,
     pub created_at: Option<String>,
 }
