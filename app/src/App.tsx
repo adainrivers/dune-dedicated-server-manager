@@ -393,6 +393,10 @@ function nullableNumber(value: string) {
   return trimmed ? Number(trimmed) : null;
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function generateToken() {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
@@ -809,16 +813,34 @@ export default function App() {
 
   async function startVm() {
     setBusy(true);
+    if (vm) {
+      setVm({ ...vm, state: "Starting", status: "Starting" });
+    }
     const nextVm = await capture("Start VM", () => invoke<VmStatus>("start_vm", { vmName: config.vmName }));
     if (nextVm) setVm(nextVm);
+    await pollVmLifecycle("running");
     setBusy(false);
   }
 
   async function stopVm() {
     setBusy(true);
+    if (vm) {
+      setVm({ ...vm, state: "Stopping", status: "Stopping" });
+    }
     const nextVm = await capture("Stop VM", () => invoke<VmStatus>("stop_vm", { vmName: config.vmName }));
     if (nextVm) setVm(nextVm);
+    await pollVmLifecycle("off");
     setBusy(false);
+  }
+
+  async function pollVmLifecycle(targetState: string) {
+    for (let index = 0; index < 20; index += 1) {
+      await delay(1500);
+      const nextVm = await capture("VM lifecycle", () => invoke<VmStatus>("get_vm_status", { vmName: config.vmName }));
+      if (!nextVm) return;
+      setVm(nextVm);
+      if (nextVm.state.toLowerCase() === targetState) return;
+    }
   }
 
   async function setBattleGroupRunning(running: boolean) {

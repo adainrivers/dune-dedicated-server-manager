@@ -832,7 +832,7 @@ fn start_vm(app: AppHandle, vm_name: Option<String>) -> CommandResult<VmStatus> 
         r#"
 $ErrorActionPreference = 'Stop'
 $vmName = {vm_name}
-Start-VM -Name $vmName | Out-Null
+Start-VM -Name $vmName -AsJob | Out-Null
 "#,
         vm_name = ps_single_quoted(&vm_name)
     );
@@ -847,7 +847,7 @@ fn stop_vm(app: AppHandle, vm_name: Option<String>) -> CommandResult<VmStatus> {
         r#"
 $ErrorActionPreference = 'Stop'
 $vmName = {vm_name}
-Stop-VM -Name $vmName -Force | Out-Null
+Stop-VM -Name $vmName -Force -AsJob | Out-Null
 "#,
         vm_name = ps_single_quoted(&vm_name)
     );
