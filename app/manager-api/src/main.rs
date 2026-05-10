@@ -19,7 +19,6 @@ use kube::{
     api::{ApiResource, DynamicObject, ListParams, LogParams, Patch, PatchParams},
     Api, Client,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     env,
@@ -31,6 +30,10 @@ use tokio::{net::TcpListener, time};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info};
 
+mod models;
+
+use models::*;
+
 const DEFAULT_PORT: u16 = 8787;
 
 #[derive(Clone)]
@@ -40,179 +43,6 @@ struct AppState {
     token: Option<String>,
     director_base_url: Option<String>,
     http: reqwest::Client,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LogQuery {
-    pod: String,
-    container: Option<String>,
-    tail: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WsQuery {
-    token: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HealthResponse {
-    ok: bool,
-    namespace: String,
-    auth_enabled: bool,
-    director_configured: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StatusResponse {
-    namespace: String,
-    auth_enabled: bool,
-    director_configured: bool,
-    battlegroups: usize,
-    pods: usize,
-    services: usize,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PodSummary {
-    name: String,
-    phase: String,
-    ready: bool,
-    restarts: i32,
-    node_name: Option<String>,
-    created_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ServicePortSummary {
-    name: Option<String>,
-    port: i32,
-    target_port: Option<String>,
-    node_port: Option<i32>,
-    protocol: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ServiceSummary {
-    name: String,
-    service_type: Option<String>,
-    cluster_ip: Option<String>,
-    external_ips: Vec<String>,
-    ports: Vec<ServicePortSummary>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BattleGroupSummary {
-    namespace: String,
-    name: String,
-    title: String,
-    phase: String,
-    stop: bool,
-    server_sets: usize,
-    server_image: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ServerSetSummary {
-    map: String,
-    replicas: u64,
-    memory_limit: String,
-    dedicated_scaling: bool,
-    image: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BattleGroupDetail {
-    namespace: String,
-    name: String,
-    title: String,
-    phase: String,
-    stop: bool,
-    database_phase: String,
-    server_group_phase: String,
-    gateway_phase: String,
-    director_phase: String,
-    server_image: String,
-    utility_images: Vec<String>,
-    server_sets: Vec<ServerSetSummary>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkloadsResponse {
-    pods: Vec<PodSummary>,
-    services: Vec<ServiceSummary>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DirectorCapabilities {
-    configured: bool,
-    api_paths: Vec<DirectorPathCapability>,
-    ui_proxy_path: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DirectorPathCapability {
-    method: &'static str,
-    path: &'static str,
-}
-
-#[derive(Debug, Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct DirectorPlayerSummary {
-    active: i64,
-    online: i64,
-    in_transit: i64,
-    grace_period: i64,
-    completion: i64,
-    queued: i64,
-    login_requests_total: i64,
-    travel_requests_total: i64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DirectorMapSummary {
-    name: String,
-    kind: String,
-    players: i64,
-    online: i64,
-    queued: i64,
-    servers: Vec<DirectorServerSummary>,
-    has_override: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DirectorServerSummary {
-    label: String,
-    server_id: String,
-    partition_id: Option<i64>,
-    dimension_index: Option<i64>,
-    players: i64,
-    online: i64,
-    queued: Option<i64>,
-    status: String,
-    heartbeat_seconds_ago: Option<i64>,
-    has_override: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TelemetryEnvelope {
-    event_type: String,
-    time_unix_ms: u128,
-    payload: Value,
 }
 
 #[tokio::main]

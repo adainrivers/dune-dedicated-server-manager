@@ -1,13 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   Activity,
-  CheckCircle2,
   Database,
   Download,
   ExternalLink,
   HardDrive,
   Map,
-  MinusCircle,
   PackagePlus,
   RadioTower,
   Play,
@@ -19,397 +17,44 @@ import {
   Square,
   Terminal,
   Users,
-  XCircle,
-  Wifi,
-  type LucideIcon
+  Wifi
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-
-type CommandFailure = {
-  message: string;
-  stdout?: string;
-  stderr?: string;
-  code?: number;
-};
-
-type HostStatus = {
-  user: string;
-  isElevated: boolean;
-  hypervAvailable: boolean;
-  vmmsStatus?: string | null;
-  sshAvailable: boolean;
-  defaultInstallPathExists: boolean;
-  defaultInstallPath: string;
-};
-
-type AppConfig = {
-  installPath: string;
-  vmName: string;
-  vmIp: string;
-  sshUser: string;
-  sshPath: string;
-  managerApiUrl: string;
-  managerApiToken: string;
-  managerApiNamespace: string;
-  managerApiImage: string;
-  managerApiBinaryPath: string;
-  managerApiDirectorUrl: string;
-};
-
-type VmStatus = {
-  name: string;
-  state: string;
-  status: string;
-  memoryAssignedBytes: number;
-  uptime: string;
-  path: string;
-  configurationLocation: string;
-  ipAddresses: string[];
-};
-
-type GuestConnection = {
-  ip: string;
-  sshUser: string;
-  keyPath: string;
-  connected: boolean;
-  sudo: boolean;
-  hostname: string;
-  kernel: string;
-  kubectl: boolean;
-};
-
-type BattleGroupSummary = {
-  namespace: string;
-  name: string;
-  title: string;
-  phase: string;
-  stop: boolean;
-  serverImage: string;
-  fileBrowserUrl?: string | null;
-  directorUrl?: string | null;
-  serverSets: number;
-};
-
-type ServerSetSummary = {
-  map: string;
-  replicas: number;
-  memoryLimit: string;
-  dedicatedScaling: boolean;
-  image: string;
-};
-
-type BattleGroupDetail = {
-  namespace: string;
-  name: string;
-  title: string;
-  phase: string;
-  stop: boolean;
-  databasePhase: string;
-  serverGroupPhase: string;
-  gatewayPhase: string;
-  directorPhase: string;
-  serverImage: string;
-  utilityImages: string[];
-  serverSets: ServerSetSummary[];
-};
-
-type KubeItem = {
-  metadata?: {
-    name?: string;
-    namespace?: string;
-    creationTimestamp?: string;
-  };
-  status?: Record<string, unknown>;
-  spec?: Record<string, unknown>;
-};
-
-type Workloads = {
-  pods: {
-    items?: KubeItem[];
-  };
-  services: {
-    items?: KubeItem[];
-  };
-};
-
-type ManagerPodSummary = {
-  name: string;
-  phase: string;
-  ready: boolean;
-  restarts: number;
-  nodeName?: string | null;
-  createdAt?: string | null;
-};
-
-type ManagerServicePortSummary = {
-  name?: string | null;
-  port: number;
-  targetPort?: string | null;
-  nodePort?: number | null;
-  protocol?: string | null;
-};
-
-type ManagerServiceSummary = {
-  name: string;
-  serviceType?: string | null;
-  clusterIp?: string | null;
-  externalIps: string[];
-  ports: ManagerServicePortSummary[];
-};
-
-type ManagerWorkloads = {
-  pods: ManagerPodSummary[];
-  services: ManagerServiceSummary[];
-};
-
-type ManagerApiStatus = {
-  namespace: string;
-  authEnabled: boolean;
-  directorConfigured: boolean;
-  battlegroups: number;
-  pods: number;
-  services: number;
-};
-
-type TelemetryEnvelope = {
-  eventType: string;
-  timeUnixMs: number;
-  payload?: {
-    battlegroups?: unknown[];
-    pods?: unknown[];
-    services?: unknown[];
-  };
-};
-
-type ManagerApiInstallResult = {
-  namespace: string;
-  deployment: string;
-  service: string;
-  binaryPath: string;
-  url: string;
-};
-
-type DirectorPlayerSummary = {
-  active: number;
-  online: number;
-  inTransit: number;
-  gracePeriod: number;
-  completion: number;
-  queued: number;
-  loginRequestsTotal: number;
-  travelRequestsTotal: number;
-};
-
-type DirectorServerSummary = {
-  label: string;
-  serverId: string;
-  partitionId?: number | null;
-  dimensionIndex?: number | null;
-  players: number;
-  online: number;
-  queued?: number | null;
-  status: string;
-  heartbeatSecondsAgo?: number | null;
-  hasOverride: boolean;
-};
-
-type DirectorMapSummary = {
-  name: string;
-  kind: string;
-  players: number;
-  online: number;
-  queued: number;
-  servers: DirectorServerSummary[];
-  hasOverride: boolean;
-};
-
-type FlsDraft = {
-  heartbeatSeconds: string;
-  settingsSeconds: string;
-};
-
-type TransferDraft = {
-  deleteOrigin: boolean;
-  incoming: string;
-  outgoing: boolean;
-  exportTimeout: string;
-  importTimeout: string;
-  freeFrom: boolean;
-  freeTo: boolean;
-  validateTimeout: string;
-  worldClosed: boolean;
-  worldClosingSoon: boolean;
-};
-
-type MapOverrideDraft = {
-  playerHardCap: string;
-  updatePlayerCountOnFls: boolean;
-  enforceSameHomeDimension: boolean;
-  automaticScaling: boolean;
-  throttlingSeconds: string;
-  minServers: string;
-  extraServers: string;
-};
-
-type ViewKey =
-  | "overview"
-  | "host"
-  | "manager"
-  | "players"
-  | "battlegroups"
-  | "workloads"
-  | "director"
-  | "config"
-  | "logs";
-
-const defaultConfig: AppConfig = {
-  installPath: "",
-  vmName: "",
-  vmIp: "",
-  sshUser: "",
-  sshPath: "",
-  managerApiUrl: "",
-  managerApiToken: "",
-  managerApiNamespace: "",
-  managerApiImage: "",
-  managerApiBinaryPath: "",
-  managerApiDirectorUrl: ""
-};
-
-function formatBytes(bytes: number) {
-  if (!bytes) return "0 GB";
-  return `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
-}
-
-function asError(error: unknown): CommandFailure {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    return error as CommandFailure;
-  }
-  return { message: String(error) };
-}
-
-function statusTone(value?: string | boolean | null) {
-  const text = String(value ?? "").toLowerCase();
-  if (
-    value === true ||
-    [
-      "running",
-      "ready",
-      "healthy",
-      "available",
-      "connected",
-      "online",
-      "operating normally",
-      "active",
-      "succeeded",
-      "ok"
-    ].includes(text)
-  ) {
-    return "good";
-  }
-  if (value === false || ["stopped", "suspended", "disabled", "offline", "error", "failed"].includes(text)) {
-    return "bad";
-  }
-  return "warn";
-}
-
-function StatusPill({ value }: { value?: string | boolean | null }) {
-  const label = typeof value === "boolean" ? (value ? "Yes" : "No") : value || "Unknown";
-  return <span className={`pill ${statusTone(value)}`}>{label}</span>;
-}
-
-function StatusLamp({ value, label }: { value?: string | boolean | null; label: string }) {
-  const tone = statusTone(value);
-  const Icon = tone === "good" ? CheckCircle2 : tone === "bad" ? XCircle : MinusCircle;
-  const text = typeof value === "boolean" ? (value ? "Ready" : "Unavailable") : value || "Unknown";
-  return (
-    <span className={`status-lamp ${tone}`} title={`${label}: ${text}`} aria-label={`${label}: ${text}`}>
-      <Icon size={18} />
-    </span>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value?: string | number | null }) {
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong>{value || "Unknown"}</strong>
-    </div>
-  );
-}
-
-function StatusInfoRow({ label, value }: { label: string; value?: string | boolean | null }) {
-  return (
-    <div className="info-row">
-      <span>{label}</span>
-      <strong>
-        <StatusPill value={value} />
-      </strong>
-    </div>
-  );
-}
-
-function vmHealthLabel(state?: string | null, status?: string | null) {
-  if (!status) return "Unknown";
-  if ((state ?? "").toLowerCase() === "off" && status.toLowerCase() === "operating normally") {
-    return "Configuration OK";
-  }
-  return status;
-}
-
-function EmptyState({ text }: { text: string }) {
-  return <div className="empty-state">{text}</div>;
-}
-
-function Metric({ label, value }: { label: string; value?: string | number | null }) {
-  return (
-    <div className="metric">
-      <strong>{value ?? "Unknown"}</strong>
-      <span>{label}</span>
-    </div>
-  );
-}
-
-function valueAt(value: unknown, path: string[]) {
-  let current = value;
-  for (const key of path) {
-    if (!current || typeof current !== "object" || !(key in current)) return null;
-    current = (current as Record<string, unknown>)[key];
-  }
-  if (current === null || current === undefined) return null;
-  if (typeof current === "boolean") return current ? "true" : "false";
-  if (typeof current === "number" || typeof current === "string") return current;
-  return JSON.stringify(current);
-}
-
-function numberAt(value: unknown, path: string[], fallback = "") {
-  const found = valueAt(value, path);
-  return found === null ? fallback : String(found);
-}
-
-function boolAt(value: unknown, path: string[], fallback = false) {
-  let current = value;
-  for (const key of path) {
-    if (!current || typeof current !== "object" || !(key in current)) return fallback;
-    current = (current as Record<string, unknown>)[key];
-  }
-  return typeof current === "boolean" ? current : fallback;
-}
-
-function nullableNumber(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? Number(trimmed) : null;
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-function generateToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
+import { EmptyState, InfoRow, Metric, StatusInfoRow, StatusLamp, StatusPill } from "./components/primitives";
+import type {
+  AppConfig,
+  BattleGroupDetail,
+  BattleGroupSummary,
+  CommandFailure,
+  DirectorMapSummary,
+  DirectorPlayerSummary,
+  FlsDraft,
+  GuestConnection,
+  HostStatus,
+  ManagerApiInstallResult,
+  ManagerApiStatus,
+  ManagerWorkloads,
+  MapOverrideDraft,
+  NavItem,
+  TelemetryEnvelope,
+  TransferDraft,
+  ViewKey,
+  VmStatus,
+  Workloads
+} from "./types";
+import {
+  asError,
+  boolAt,
+  defaultConfig,
+  delay,
+  formatBytes,
+  generateToken,
+  managerWorkloadsToUi,
+  nullableNumber,
+  numberAt,
+  valueAt,
+  vmHealthLabel
+} from "./utils";
 
 export default function App() {
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
@@ -530,7 +175,7 @@ export default function App() {
     activeView === "overview"
       ? selectedBattleGroup?.name || "No battlegroup detected"
       : selectedBattleGroup?.title || selectedBattleGroup?.name || "No battlegroup selected";
-  const navItems: { key: ViewKey; label: string; icon: LucideIcon; disabled?: boolean }[] = [
+  const navItems: NavItem[] = [
     { key: "overview", label: "Overview", icon: Server },
     { key: "host", label: "Host & VM", icon: HardDrive },
     { key: "manager", label: "Manager API", icon: RadioTower },
@@ -567,28 +212,6 @@ export default function App() {
       throw new Error(body || `Manager API returned ${response.status}`);
     }
     return (await response.json()) as T;
-  }
-
-  function managerWorkloadsToUi(value: ManagerWorkloads): Workloads {
-    return {
-      pods: {
-        items: value.pods.map((pod) => ({
-          metadata: { name: pod.name, creationTimestamp: pod.createdAt ?? undefined },
-          status: { phase: pod.phase, ready: pod.ready, restarts: pod.restarts }
-        }))
-      },
-      services: {
-        items: value.services.map((service) => ({
-          metadata: { name: service.name },
-          spec: {
-            type: service.serviceType,
-            clusterIP: service.clusterIp,
-            externalIPs: service.externalIps,
-            ports: service.ports
-          }
-        }))
-      }
-    };
   }
 
   async function refresh() {
