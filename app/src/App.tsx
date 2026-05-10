@@ -5,6 +5,7 @@ import {
   Download,
   ExternalLink,
   HardDrive,
+  RadioTower,
   Play,
   RefreshCw,
   RotateCcw,
@@ -40,6 +41,8 @@ type AppConfig = {
   vmIp: string;
   sshUser: string;
   sshPath: string;
+  managerApiUrl: string;
+  managerApiToken: string;
 };
 
 type VmStatus = {
@@ -118,12 +121,33 @@ type Workloads = {
   };
 };
 
+type ManagerApiStatus = {
+  namespace: string;
+  authEnabled: boolean;
+  directorConfigured: boolean;
+  battlegroups: number;
+  pods: number;
+  services: number;
+};
+
+type TelemetryEnvelope = {
+  eventType: string;
+  timeUnixMs: number;
+  payload?: {
+    battlegroups?: unknown[];
+    pods?: unknown[];
+    services?: unknown[];
+  };
+};
+
 const defaultConfig: AppConfig = {
   installPath: "",
   vmName: "",
   vmIp: "",
   sshUser: "",
-  sshPath: ""
+  sshPath: "",
+  managerApiUrl: "",
+  managerApiToken: ""
 };
 
 function formatBytes(bytes: number) {
@@ -181,6 +205,12 @@ export default function App() {
   const [snapshotPath, setSnapshotPath] = useState<string>("");
   const [configSaved, setConfigSaved] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [managerStatus, setManagerStatus] = useState<ManagerApiStatus | null>(null);
+  const [managerTelemetry, setManagerTelemetry] = useState<TelemetryEnvelope | null>(null);
+  const [managerSocketState, setManagerSocketState] = useState<"disabled" | "connecting" | "connected" | "error">(
+    "disabled"
+  );
+  const [managerError, setManagerError] = useState("");
 
   const selectedBattleGroup = useMemo(
     () => battleGroups.find((group) => group.namespace === selectedNamespace) ?? battleGroups[0],
@@ -196,6 +226,7 @@ export default function App() {
     selectedBattleGroup?.stop === false &&
     ["running", "ready", "starting"].includes(selectedBattleGroup?.phase.toLowerCase() ?? "");
   const canUseGuest = vmIsRunning && guest?.connected && guest?.kubectl;
+  const managerApiConfigured = config.managerApiUrl.trim().length > 0;
 
   async function capture<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
     try {
@@ -366,6 +397,71 @@ export default function App() {
     }
   }, [configLoaded, config.vmName, config.installPath, config.sshUser]);
 
+  useEffect(() => {
+    const baseUrl = config.managerApiUrl.trim().replace(/\/$/, "");
+    if (!configLoaded || !baseUrl) {
+      setManagerStatus(null);
+      setManagerTelemetry(null);
+      setManagerSocketState("disabled");
+      setManagerError("");
+      return;
+    }
+
+    let closed = false;
+    const headers: HeadersInit = config.managerApiToken
+      ? { Authorization: `Bearer ${config.managerApiToken}` }
+      : {};
+
+    async function loadManagerStatus() {
+      try {
+        const response = await fetch(`${baseUrl}/api/status`, { headers });
+        if (!response.ok) throw new Error(`Manager API returned ${response.status}`);
+        const nextStatus = (await response.json()) as ManagerApiStatus;
+        if (!closed) {
+          setManagerStatus(nextStatus);
+          setManagerError("");
+        }
+      } catch (error) {
+        if (!closed) {
+          setManagerStatus(null);
+          setManagerError(String(error));
+        }
+      }
+    }
+
+    void loadManagerStatus();
+    setManagerSocketState("connecting");
+    const websocketUrl = `${baseUrl.replace(/^http/i, "ws")}/api/telemetry${
+      config.managerApiToken ? `?token=${encodeURIComponent(config.managerApiToken)}` : ""
+    }`;
+    const socket = new WebSocket(websocketUrl);
+
+    socket.onopen = () => {
+      if (!closed) setManagerSocketState("connected");
+    };
+    socket.onmessage = (event) => {
+      if (closed) return;
+      try {
+        const envelope = JSON.parse(event.data) as TelemetryEnvelope;
+        setManagerTelemetry(envelope);
+        setManagerError("");
+      } catch {
+        setManagerError("Manager API sent an unreadable telemetry event");
+      }
+    };
+    socket.onerror = () => {
+      if (!closed) setManagerSocketState("error");
+    };
+    socket.onclose = () => {
+      if (!closed) setManagerSocketState("error");
+    };
+
+    return () => {
+      closed = true;
+      socket.close();
+    };
+  }, [configLoaded, config.managerApiUrl, config.managerApiToken]);
+
   const pods = workloads?.pods.items ?? [];
   const services = workloads?.services.items ?? [];
 
@@ -383,6 +479,7 @@ export default function App() {
           <a className="active">Overview</a>
           <a>Host & VM</a>
           <a>BattleGroups</a>
+          <a>Manager API</a>
           <a>Pods & Services</a>
           <a>Config</a>
           <a>Logs</a>
@@ -427,6 +524,11 @@ export default function App() {
             <span>BattleGroup</span>
             <StatusPill value={selectedBattleGroup?.phase} />
           </div>
+          <div>
+            <RadioTower size={18} />
+            <span>Manager API</span>
+            <StatusPill value={managerSocketState === "connected"} />
+          </div>
         </section>
 
         <section className="settings-band">
@@ -468,6 +570,24 @@ export default function App() {
               <input
                 value={config.sshPath}
                 onChange={(event) => setConfig((current) => ({ ...current, sshPath: event.target.value }))}
+                onBlur={() => void saveConfig()}
+              />
+            </label>
+            <label>
+              Manager API URL
+              <input
+                placeholder="http://127.0.0.1:8787"
+                value={config.managerApiUrl}
+                onChange={(event) => setConfig((current) => ({ ...current, managerApiUrl: event.target.value }))}
+                onBlur={() => void saveConfig()}
+              />
+            </label>
+            <label>
+              Manager API token
+              <input
+                type="password"
+                value={config.managerApiToken}
+                onChange={(event) => setConfig((current) => ({ ...current, managerApiToken: event.target.value }))}
                 onBlur={() => void saveConfig()}
               />
             </label>
@@ -526,6 +646,38 @@ export default function App() {
             <InfoRow label="Passwordless sudo" value={guest?.sudo ? "Ready" : "Unavailable"} />
             <InfoRow label="kubectl" value={guest?.kubectl ? "Ready" : "Unavailable"} />
           </article>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Manager API</h2>
+            <RadioTower size={19} />
+          </div>
+          <section className="config-summary">
+            <InfoRow label="URL" value={config.managerApiUrl || "Not configured"} />
+            <InfoRow label="Socket" value={managerApiConfigured ? managerSocketState : "Disabled"} />
+            <InfoRow label="Namespace" value={managerStatus?.namespace} />
+            <InfoRow label="Director bridge" value={managerStatus?.directorConfigured ? "Configured" : "Unavailable"} />
+            <InfoRow
+              label="Telemetry"
+              value={
+                managerTelemetry?.payload
+                  ? `${managerTelemetry.payload.pods?.length ?? 0} pods, ${
+                      managerTelemetry.payload.services?.length ?? 0
+                    } services`
+                  : "No events yet"
+              }
+            />
+            <InfoRow
+              label="Snapshot counts"
+              value={
+                managerStatus
+                  ? `${managerStatus.battlegroups} battlegroups, ${managerStatus.pods} pods, ${managerStatus.services} services`
+                  : "Unknown"
+              }
+            />
+          </section>
+          {managerError && <p className="subtle-line">{managerError}</p>}
         </section>
 
         <section className="panel">

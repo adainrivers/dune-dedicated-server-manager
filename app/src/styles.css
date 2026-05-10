@@ -162,7 +162,7 @@ h2 {
 
 .status-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -438,6 +438,11 @@ tr:hover {
 .success-line {
   margin-top: 12px;
   color: #8cebd8;
+  overflow-wrap: anywhere;
+}
+
+.subtle-line {
+  color: #98a6a4;
   overflow-wrap: anywhere;
 }
 

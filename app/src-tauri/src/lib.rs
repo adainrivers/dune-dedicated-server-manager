@@ -32,12 +32,15 @@ struct HostStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
 struct AppConfig {
     install_path: String,
     vm_name: String,
     vm_ip: String,
     ssh_user: String,
     ssh_path: String,
+    manager_api_url: String,
+    manager_api_token: String,
 }
 
 impl Default for AppConfig {
@@ -48,6 +51,8 @@ impl Default for AppConfig {
             vm_ip: String::new(),
             ssh_user: String::new(),
             ssh_path: String::new(),
+            manager_api_url: String::new(),
+            manager_api_token: String::new(),
         }
     }
 }
@@ -291,6 +296,12 @@ fn normalize_config(mut config: AppConfig) -> AppConfig {
     config.vm_ip = config.vm_ip.trim().to_string();
     config.ssh_user = config.ssh_user.trim().to_string();
     config.ssh_path = config.ssh_path.trim().to_string();
+    config.manager_api_url = config
+        .manager_api_url
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    config.manager_api_token = config.manager_api_token.trim().to_string();
     config
 }
 
