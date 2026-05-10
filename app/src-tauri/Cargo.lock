@@ -671,12 +671,21 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 name = "dune-dedicated-server-manager"
 version = "0.1.0"
 dependencies = [
+ "dune-manager-core",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "dune-manager-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -10,6 +10,10 @@ use std::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use dune_manager_core::operation_log::{
+    classify_command_output, OperationLogEvent, StreamLogCapture,
+};
+
 use crate::{
     config_store::{app_data_dir, read_app_config, write_app_config},
     errors::{failure, parse_json},
@@ -17,7 +21,6 @@ use crate::{
         CommandResult, GuestBootstrapRequest, SetupCommandResult, SetupPersistedState, SetupState,
         SteamCmdDetection, VmDestinationStatus, VmImportOptions,
     },
-    operation_log::{classify_command_output, OperationLogEvent, StreamLogCapture},
     security::redact_text,
     shell::{ps_single_quoted, run_powershell},
     ssh::{prepare_key, run_ssh},
@@ -32,7 +35,7 @@ const WORLD_REGIONS: &[&str] = &["Europe Test", "North America Test"];
 #[serde(rename_all = "camelCase")]
 struct SetupOutputEvent {
     stage: String,
-    level: crate::operation_log::LogLevel,
+    level: dune_manager_core::operation_log::LogLevel,
     message: String,
 }
 

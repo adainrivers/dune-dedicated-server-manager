@@ -1,12 +1,9 @@
 use tauri::AppHandle;
 
 mod battlegroups;
-pub mod cli;
 mod config_store;
 mod errors;
 mod models;
-pub mod operation_log;
-pub mod orchestration;
 mod security;
 mod setup;
 mod shell;
