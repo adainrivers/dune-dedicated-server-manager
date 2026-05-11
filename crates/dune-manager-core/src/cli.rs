@@ -142,6 +142,7 @@ fn run_cli(args: Vec<String>) -> CommandResult<Value> {
         }
         ["setup", "create-vm"] => {
             let memory_gb = args.optional_u64("--memory-gb")?.unwrap_or(20);
+            let processor_count = args.optional_u64("--processors")?.unwrap_or(4);
             let disk_gb = args
                 .optional_u64("--disk-gb")?
                 .unwrap_or(DEFAULT_VM_DISK_BYTES / 1024 / 1024 / 1024);
@@ -152,12 +153,17 @@ fn run_cli(args: Vec<String>) -> CommandResult<Value> {
                 switch_name: args.required("--switch")?,
                 adapter_name: args.required("--adapter")?,
                 memory: memory_profile(memory_gb)?,
+                processor_count: u32::try_from(processor_count)
+                    .map_err(|_| failure("--processors must fit in a 32-bit value"))?,
                 replace_existing_vm: args.has_flag("--replace-existing"),
                 clear_destination: args.has_flag("--clear-destination"),
                 disk_size_bytes: disk_gb.saturating_mul(1024 * 1024 * 1024),
             };
             if request.disk_size_bytes == 0 {
                 return Err(failure("--disk-gb must be greater than zero"));
+            }
+            if request.processor_count == 0 {
+                return Err(failure("--processors must be greater than zero"));
             }
             let provider = StrictPowerShellHyperV::new();
             let mut sink = VecOperationSink::default();
@@ -666,7 +672,7 @@ fn usage() -> Vec<&'static str> {
         "dune-manager-cli vm detect-dune",
         "dune-manager-cli vm start --name NAME",
         "dune-manager-cli vm stop --name NAME",
-        "dune-manager-cli setup create-vm --install-path PATH --destination PATH --vm-name NAME --switch NAME --adapter NAME [--memory-gb 20] [--disk-gb 100] [--replace-existing] [--clear-destination]",
+        "dune-manager-cli setup create-vm --install-path PATH --destination PATH --vm-name NAME --switch NAME --adapter NAME [--memory-gb 20] [--processors 4] [--disk-gb 100] [--replace-existing] [--clear-destination]",
         "dune-manager-cli ssh shell-spec --ssh PATH --key PATH --host IP [--user dune]",
         "dune-manager-cli token plan (--token JWT | --token-file PATH | --token-env NAME) --player-ip IP --world-name NAME [--region \"Europe Test\"]",
         "dune-manager-cli guest player-candidates --ssh PATH --key PATH --host IP [--user dune]",

@@ -55,6 +55,8 @@ pub struct HyperVVmSetupRequest {
     pub adapter_name: String,
     /// Startup memory profile for the VM.
     pub memory: MemoryProfile,
+    /// Virtual processor count assigned during initial setup.
+    pub processor_count: u32,
     /// Whether an existing VM registration with the same name may be removed.
     pub replace_existing_vm: bool,
     /// Whether an existing destination folder may be deleted first.
@@ -78,6 +80,9 @@ impl HyperVVmSetupRequest {
         if self.memory.bytes() == 0 {
             return Err(failure("VM memory must be greater than zero"));
         }
+        if self.processor_count == 0 {
+            return Err(failure("VM processor count must be greater than zero"));
+        }
         if self.disk_size_bytes == 0 {
             return Err(failure("VM disk size must be greater than zero"));
         }
@@ -96,6 +101,7 @@ impl Default for HyperVVmSetupRequest {
             switch_name: "DuneAwakeningServerSwitch".to_string(),
             adapter_name: String::new(),
             memory: MemoryProfile::Sietch20Gb,
+            processor_count: 4,
             replace_existing_vm: false,
             clear_destination: false,
             disk_size_bytes: DEFAULT_VM_DISK_BYTES,
@@ -336,6 +342,16 @@ where
 
         emit_hyperv_event(
             sink,
+            "hyperv.set-processors",
+            "Configuring VM processor count.",
+            StepDomain::HyperV,
+            StepAction::Configure,
+        );
+        self.vm
+            .set_processor_count(&imported.name, request.processor_count)?;
+
+        emit_hyperv_event(
+            sink,
             "hyperv.start-vm",
             "Starting VM.",
             StepDomain::HyperV,
@@ -475,6 +491,7 @@ mod tests {
                 virtualization_firmware_enabled: Some(true),
                 total_physical_memory_bytes: 64 * 1024 * 1024 * 1024,
                 available_physical_memory_bytes: 48 * 1024 * 1024 * 1024,
+                logical_processor_count: 16,
             })
         }
 
@@ -569,6 +586,11 @@ mod tests {
             self.calls.borrow_mut().push("set_startup_memory");
             Ok(())
         }
+
+        fn set_processor_count(&self, _vm_name: &str, _count: u32) -> CommandResult<()> {
+            self.calls.borrow_mut().push("set_processor_count");
+            Ok(())
+        }
     }
 
     #[test]
@@ -596,6 +618,7 @@ mod tests {
                     switch_name: "switch".to_string(),
                     adapter_name: "Ethernet".to_string(),
                     memory: MemoryProfile::Sietch20Gb,
+                    processor_count: 4,
                     replace_existing_vm: false,
                     clear_destination: false,
                     disk_size_bytes: DEFAULT_VM_DISK_BYTES,
@@ -616,6 +639,7 @@ mod tests {
                 "resize_first_vhd",
                 "set_first_boot_disk",
                 "set_startup_memory",
+                "set_processor_count",
                 "start_vm",
             ]
         );
@@ -642,6 +666,7 @@ mod tests {
                 configuration_location: String::new(),
                 path: String::new(),
                 memory_assigned_bytes: 0,
+                processor_count: 0,
                 uptime_seconds: 0,
                 ipv4_addresses: vec![],
                 hard_disk_paths: vec![],
@@ -661,6 +686,7 @@ mod tests {
                     switch_name: "switch".to_string(),
                     adapter_name: "Ethernet".to_string(),
                     memory: MemoryProfile::Sietch20Gb,
+                    processor_count: 4,
                     replace_existing_vm: false,
                     clear_destination: false,
                     disk_size_bytes: DEFAULT_VM_DISK_BYTES,
@@ -697,6 +723,7 @@ mod tests {
                     switch_name: "switch".to_string(),
                     adapter_name: "Ethernet".to_string(),
                     memory: MemoryProfile::Sietch20Gb,
+                    processor_count: 4,
                     replace_existing_vm: false,
                     clear_destination: false,
                     disk_size_bytes: DEFAULT_VM_DISK_BYTES,
@@ -732,6 +759,7 @@ mod tests {
                     switch_name: "switch".to_string(),
                     adapter_name: "Ethernet".to_string(),
                     memory: MemoryProfile::Sietch20Gb,
+                    processor_count: 4,
                     replace_existing_vm: false,
                     clear_destination: false,
                     disk_size_bytes: DEFAULT_VM_DISK_BYTES,

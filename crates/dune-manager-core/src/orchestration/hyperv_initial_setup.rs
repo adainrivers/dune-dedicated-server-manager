@@ -248,6 +248,7 @@ mod tests {
                 virtualization_firmware_enabled: Some(true),
                 total_physical_memory_bytes: 64 * 1024 * 1024 * 1024,
                 available_physical_memory_bytes: 48 * 1024 * 1024 * 1024,
+                logical_processor_count: 16,
             })
         }
 
@@ -284,6 +285,7 @@ mod tests {
                 configuration_location: String::new(),
                 path: String::new(),
                 memory_assigned_bytes: 0,
+                processor_count: 0,
                 uptime_seconds: 0,
                 ipv4_addresses: vec!["10.0.0.4".to_string()],
                 hard_disk_paths: vec![],
@@ -353,6 +355,11 @@ mod tests {
 
         fn set_startup_memory(&self, _vm_name: &str, _bytes: u64) -> CommandResult<()> {
             self.calls.borrow_mut().push("set_startup_memory");
+            Ok(())
+        }
+
+        fn set_processor_count(&self, _vm_name: &str, _count: u32) -> CommandResult<()> {
+            self.calls.borrow_mut().push("set_processor_count");
             Ok(())
         }
     }
@@ -500,6 +507,7 @@ mod tests {
                         switch_name: "switch".to_string(),
                         adapter_name: "Ethernet".to_string(),
                         memory: MemoryProfile::Sietch20Gb,
+                        processor_count: 4,
                         replace_existing_vm: false,
                         clear_destination: false,
                         disk_size_bytes: DEFAULT_VM_DISK_BYTES,

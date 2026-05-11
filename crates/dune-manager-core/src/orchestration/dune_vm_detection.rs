@@ -235,6 +235,10 @@ mod tests {
             fn set_startup_memory(&self, _vm_name: &str, _bytes: u64) -> CommandResult<()> {
                 unreachable!()
             }
+
+            fn set_processor_count(&self, _vm_name: &str, _count: u32) -> CommandResult<()> {
+                unreachable!()
+            }
         }
 
         let candidates = DuneVmDetector::new(MockVmProvider).detect().unwrap();
@@ -255,6 +259,7 @@ mod tests {
             configuration_location: "D:\\VMs".to_string(),
             path: "D:\\VMs".to_string(),
             memory_assigned_bytes: 0,
+            processor_count: 0,
             uptime_seconds: 0,
             ipv4_addresses: vec![],
             hard_disk_paths: hard_disk_paths.into_iter().map(str::to_string).collect(),

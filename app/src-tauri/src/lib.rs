@@ -90,6 +90,7 @@ struct SetupRequest {
     vm_name: String,
     disk_gb: u64,
     memory_gb: u64,
+    processor_count: u32,
     enable_swap: bool,
     network_mode: String,
     switch_name: String,
@@ -372,6 +373,7 @@ fn run_full_setup(
             memory: MemoryProfile::CustomBytes(
                 request.memory_gb.saturating_mul(1024 * 1024 * 1024),
             ),
+            processor_count: request.processor_count,
             replace_existing_vm: false,
             clear_destination: false,
             disk_size_bytes: request.disk_gb.saturating_mul(1024 * 1024 * 1024),

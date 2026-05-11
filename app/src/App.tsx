@@ -60,6 +60,7 @@ type HostReadiness = {
   virtualizationFirmwareEnabled: boolean | null;
   totalPhysicalMemoryBytes: number;
   availablePhysicalMemoryBytes: number;
+  logicalProcessorCount: number;
 };
 
 type DriveCandidate = {
@@ -92,6 +93,7 @@ type VmInventoryRecord = {
   configurationLocation: string;
   path: string;
   memoryAssignedBytes: number;
+  processorCount: number;
   uptimeSeconds: number;
   ipv4Addresses: string[];
   hardDiskPaths: string[];
@@ -133,6 +135,7 @@ type SetupRunRequest = {
   vmName: string;
   diskGb: number;
   memoryGb: number;
+  processorCount: number;
   enableSwap: boolean;
   networkMode: NetworkMode;
   switchName: string;
@@ -167,6 +170,7 @@ type SetupForm = {
   vmDestination: string;
   vmName: string;
   diskGb: string;
+  processorCount: string;
   enableSwap: boolean;
   networkMode: NetworkMode;
   switchName: string;
@@ -190,6 +194,7 @@ const defaultForm: SetupForm = {
   vmDestination: "",
   vmName: "dune-server",
   diskGb: "100",
+  processorCount: "4",
   enableSwap: false,
   networkMode: "static",
   switchName: "",
@@ -417,14 +422,7 @@ export function App() {
   }, [activePage, duneVms, selectedServerName]);
 
   useEffect(() => {
-    if (import.meta.env.DEV) {
-      appendInitRow(log.debug("updates", "Automatic update checks are disabled in development builds."));
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void checkForAppUpdate("startup");
-    }, 1500);
-    return () => window.clearTimeout(timer);
+    appendInitRow(log.debug("updates", "Automatic update checks are disabled; use the manual check on Home."));
   }, []);
 
   useEffect(() => {
@@ -747,6 +745,11 @@ function HomePage({
             tone={hostReadiness ? "green" : "amber"}
           />
           <InfoRow
+            label="CPU Cores"
+            value={hostReadiness ? `${hostReadiness.logicalProcessorCount || "unknown"} logical` : "Checking"}
+            tone={hostReadiness?.logicalProcessorCount ? "green" : "amber"}
+          />
+          <InfoRow
             label="Network"
             value={
               primaryAdapter
@@ -856,8 +859,9 @@ function ServerCard({
         </Badge>
       </Flex>
 
-      <Grid columns={compact ? "2" : "4"} gap="3" mt="3">
+      <Grid columns={compact ? "2" : "5"} gap="3" mt="3">
         <Metric label="Memory" value={formatGiB(vm.memoryAssignedBytes)} />
+        <Metric label="CPU" value={vm.processorCount ? `${vm.processorCount} cores` : "unknown"} />
         <Metric label="Disk" value={`${diskLabel}; ${usedDiskLabel}`} />
         <Metric label="Switch" value={vm.switchNames.join(", ") || "none"} />
         <Metric label="Uptime" value={formatDuration(vm.uptimeSeconds)} />
@@ -900,6 +904,9 @@ function ServerDetailsPage({ candidate }: { candidate: DuneVmCandidate }) {
                 </FormRow>
                 <FormRow label="Memory">
                   <TextField.Root value={formatGiB(vm.memoryAssignedBytes)} readOnly />
+                </FormRow>
+                <FormRow label="CPU Cores">
+                  <TextField.Root value={vm.processorCount ? String(vm.processorCount) : "Unknown"} readOnly />
                 </FormRow>
                 <FormRow label="Disk">
                   <TextField.Root value={diskLabel} readOnly />
@@ -1087,6 +1094,7 @@ function InstallControls({
   const requirements = setupRequirementStatus(
     calculatedMemory,
     form.diskGb,
+    form.processorCount,
     form.vmDestination,
     hostReadiness,
     driveCandidates,
@@ -1266,6 +1274,16 @@ function InstallControls({
                     <TextField.Slot side="right">GB</TextField.Slot>
                   </TextField.Root>
                 </FormRow>
+                <FormRow label="CPU Cores">
+                  <TextField.Root
+                    value={form.processorCount}
+                    onChange={(event) => update("processorCount", event.target.value)}
+                  />
+                  <InlineRequirement
+                    ok={requirements.processorOk}
+                    text={`${requirements.processorRequired}; ${requirements.processorAvailable}`}
+                  />
+                </FormRow>
               </Flex>
 
               <Box className="memory-calculation">
@@ -1442,9 +1460,12 @@ type SetupLayoutPreview = {
 type SetupRequirements = {
   canContinue: boolean;
   memoryOk: boolean;
+  processorOk: boolean;
   diskOk: boolean;
   memoryRequired: string;
   memoryAvailable: string;
+  processorRequired: string;
+  processorAvailable: string;
   diskRequired: string;
   diskAvailable: string;
 };
@@ -1469,6 +1490,7 @@ function setupRunRequest(form: SetupForm, memoryGb: number): SetupRunRequest {
     vmName: form.vmName,
     diskGb: parsePositiveInt(form.diskGb),
     memoryGb,
+    processorCount: parsePositiveInt(form.processorCount),
     enableSwap: form.enableSwap,
     networkMode: form.networkMode,
     switchName: form.switchName,
@@ -1591,6 +1613,12 @@ function environmentLogRows(
         `Physical memory: ${formatGiB(readiness.availablePhysicalMemoryBytes)} available of ${formatGiB(readiness.totalPhysicalMemoryBytes)} total.`,
       ),
     );
+    rows.push(
+      log.info(
+        "env",
+        `CPU cores: ${readiness.logicalProcessorCount || "unknown"} logical processors detected.`,
+      ),
+    );
   }
   if (drives.length > 0) {
     rows.push(
@@ -1663,24 +1691,36 @@ function setupEnvironmentGate(
 function setupRequirementStatus(
   calculatedMemory: CalculatedMemory,
   diskGb: string,
+  processorCount: string,
   vmDestination: string,
   readiness: HostReadiness | null,
   drives: DriveCandidate[],
 ): SetupRequirements {
   const requiredMemoryBytes = calculatedMemory.gb * 1024 * 1024 * 1024;
+  const requiredProcessors = Math.max(0, parsePositiveInt(processorCount));
   const requiredDiskGb = Math.max(0, parsePositiveInt(diskGb));
   const requiredDiskBytes = requiredDiskGb * 1024 * 1024 * 1024;
   const memoryAvailable = readiness?.availablePhysicalMemoryBytes ?? 0;
+  const processorsAvailable = readiness?.logicalProcessorCount ?? 0;
   const memoryOk = memoryAvailable >= requiredMemoryBytes;
+  const processorOk =
+    requiredProcessors > 0 && (processorsAvailable === 0 || requiredProcessors <= processorsAvailable);
   const destinationDrive = findDriveForPath(vmDestination, drives);
   const diskOk = destinationDrive ? destinationDrive.freeBytes >= requiredDiskBytes : false;
 
   return {
-    canContinue: memoryOk && diskOk,
+    canContinue: memoryOk && processorOk && diskOk,
     memoryOk,
+    processorOk,
     diskOk,
     memoryRequired: `${calculatedMemory.gb} GB required`,
     memoryAvailable: readiness ? `${formatGiB(memoryAvailable)} available` : "Detecting",
+    processorRequired: `${requiredProcessors || "A positive number of"} cores requested`,
+    processorAvailable: readiness
+      ? processorsAvailable
+        ? `${processorsAvailable} logical available`
+        : "Host CPU count unavailable"
+      : "Detecting",
     diskRequired: `${requiredDiskGb} GB required`,
     diskAvailable: destinationDrive
       ? `${destinationDrive.root} has ${formatGiB(destinationDrive.freeBytes)} free`
@@ -1711,6 +1751,9 @@ function setupBlockingIssues(
   const issues = [...gate.reasons];
   if (!requirements.memoryOk) {
     issues.push(`Memory: ${requirements.memoryRequired}; ${requirements.memoryAvailable}.`);
+  }
+  if (!requirements.processorOk) {
+    issues.push(`CPU Cores: ${requirements.processorRequired}; ${requirements.processorAvailable}.`);
   }
   if (!requirements.diskOk) {
     issues.push(`VM Location: ${requirements.diskRequired}; ${requirements.diskAvailable}.`);

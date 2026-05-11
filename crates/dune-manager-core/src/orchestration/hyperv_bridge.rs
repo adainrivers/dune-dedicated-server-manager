@@ -62,6 +62,7 @@ struct RawVmRecord {
     configuration_location: String,
     path: String,
     memory_assigned_bytes: Option<u64>,
+    processor_count: Option<u32>,
     uptime_seconds: Option<u64>,
     ipv4_addresses: Vec<String>,
     hard_disk_paths: Vec<String>,
@@ -79,6 +80,7 @@ impl From<RawVmRecord> for VmInventoryRecord {
             configuration_location: value.configuration_location,
             path: value.path,
             memory_assigned_bytes: value.memory_assigned_bytes.unwrap_or_default(),
+            processor_count: value.processor_count.unwrap_or_default(),
             uptime_seconds: value.uptime_seconds.unwrap_or_default(),
             ipv4_addresses: value.ipv4_addresses,
             hard_disk_paths: value.hard_disk_paths,
@@ -99,7 +101,14 @@ $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.
 $vmms = Get-Service -Name vmms -ErrorAction SilentlyContinue
 $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
 $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue | Select-Object -First 1
+$processors = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction SilentlyContinue)
 $vmHost = Get-VMHost -ErrorAction SilentlyContinue
+$logicalProcessorCount = [uint32]0
+foreach ($processor in $processors) {
+  if ($processor.NumberOfLogicalProcessors) {
+    $logicalProcessorCount += [uint32]$processor.NumberOfLogicalProcessors
+  }
+}
 [pscustomobject]@{
   elevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
   hypervAvailable = [bool](Get-Command Get-VM -ErrorAction SilentlyContinue)
@@ -107,6 +116,7 @@ $vmHost = Get-VMHost -ErrorAction SilentlyContinue
   virtualizationFirmwareEnabled = if ($vmHost) { $true } elseif ($cpu) { [bool]$cpu.VirtualizationFirmwareEnabled } else { $null }
   totalPhysicalMemoryBytes = if ($os) { [uint64]$os.TotalVisibleMemorySize * 1024 } else { 0 }
   availablePhysicalMemoryBytes = if ($os) { [uint64]$os.FreePhysicalMemory * 1024 } else { 0 }
+  logicalProcessorCount = $logicalProcessorCount
 } | ConvertTo-Json -Compress -Depth 4
 "#
             .to_string(),
@@ -245,6 +255,7 @@ $items = @(Get-VM | Sort-Object Name | ForEach-Object {
     configurationLocation = $vm.ConfigurationLocation
     path = $vm.Path
     memoryAssignedBytes = [uint64]$vm.MemoryAssigned
+    processorCount = [uint32]$vm.ProcessorCount
     uptimeSeconds = [uint64]$vm.Uptime.TotalSeconds
     ipv4Addresses = $ips
     hardDiskPaths = $disks
@@ -291,6 +302,7 @@ foreach ($diskPath in $disks) {{
   configurationLocation = $vm.ConfigurationLocation
   path = $vm.Path
   memoryAssignedBytes = [uint64]$vm.MemoryAssigned
+  processorCount = [uint32]$vm.ProcessorCount
   uptimeSeconds = [uint64]$vm.Uptime.TotalSeconds
   ipv4Addresses = $ips
   hardDiskPaths = $disks
@@ -457,6 +469,19 @@ Set-VMFirmware -VMName {vm_name} -FirstBootDevice $drive -ErrorAction Stop
             "hyperv.vm.set-startup-memory",
             format!(
                 "Set-VMMemory -VMName {} -StartupBytes {bytes} -ErrorAction Stop; [pscustomobject]@{{ ok = $true }} | ConvertTo-Json -Compress",
+                ps_single_quoted(vm_name)
+            ),
+        )
+    }
+
+    fn set_processor_count(&self, vm_name: &str, count: u32) -> CommandResult<()> {
+        if count == 0 {
+            return Err(failure("VM processor count must be greater than zero"));
+        }
+        self.run_unit(
+            "hyperv.vm.set-processor-count",
+            format!(
+                "Set-VMProcessor -VMName {} -Count {count} -ErrorAction Stop; [pscustomobject]@{{ ok = $true }} | ConvertTo-Json -Compress",
                 ps_single_quoted(vm_name)
             ),
         )

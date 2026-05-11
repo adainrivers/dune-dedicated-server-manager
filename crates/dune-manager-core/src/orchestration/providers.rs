@@ -60,6 +60,8 @@ pub struct HostReadiness {
     pub total_physical_memory_bytes: u64,
     /// Currently available physical memory on the host in bytes.
     pub available_physical_memory_bytes: u64,
+    /// Logical processor count reported by the host.
+    pub logical_processor_count: u32,
 }
 
 /// Host drive candidate suitable for placing VM files.
@@ -120,6 +122,8 @@ pub struct VmInventoryRecord {
     pub path: String,
     /// Assigned memory in bytes.
     pub memory_assigned_bytes: u64,
+    /// Virtual processor count assigned to the VM.
+    pub processor_count: u32,
     /// Uptime in seconds.
     pub uptime_seconds: u64,
     /// IPv4 addresses reported for the VM.
@@ -249,6 +253,8 @@ pub trait VmProvider {
     fn set_first_boot_disk(&self, vm_name: &str) -> CommandResult<()>;
     /// Sets startup memory.
     fn set_startup_memory(&self, vm_name: &str, bytes: u64) -> CommandResult<()>;
+    /// Sets virtual processor count.
+    fn set_processor_count(&self, vm_name: &str, count: u32) -> CommandResult<()>;
 }
 
 impl<T> VmProvider for &T
@@ -304,6 +310,10 @@ where
 
     fn set_startup_memory(&self, vm_name: &str, bytes: u64) -> CommandResult<()> {
         (*self).set_startup_memory(vm_name, bytes)
+    }
+
+    fn set_processor_count(&self, vm_name: &str, count: u32) -> CommandResult<()> {
+        (*self).set_processor_count(vm_name, count)
     }
 }
 

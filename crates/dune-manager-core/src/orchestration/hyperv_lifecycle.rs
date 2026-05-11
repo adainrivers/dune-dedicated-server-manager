@@ -112,6 +112,10 @@ mod tests {
         fn set_startup_memory(&self, _vm_name: &str, _bytes: u64) -> CommandResult<()> {
             Ok(())
         }
+
+        fn set_processor_count(&self, _vm_name: &str, _count: u32) -> CommandResult<()> {
+            Ok(())
+        }
     }
 
     #[test]
