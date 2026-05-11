@@ -7,7 +7,9 @@ use crate::models::CommandResult;
 
 /// Runs a program and returns trimmed stdout when it exits successfully.
 pub fn run_program(program: &str, args: &[&str]) -> CommandResult<String> {
-    let output = Command::new(program)
+    let mut command = Command::new(program);
+    suppress_console_window(&mut command);
+    let output = command
         .args(args)
         .output()
         .map_err(|err| failure(format!("Failed to run {program}: {err}")))?;
@@ -20,6 +22,18 @@ pub fn run_program(program: &str, args: &[&str]) -> CommandResult<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Configures a child process so GUI launches on Windows do not flash a console window.
+pub fn suppress_console_window(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 /// Runs a PowerShell script with non-profile, bypassed execution policy options.

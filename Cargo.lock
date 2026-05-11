@@ -944,7 +944,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "dune-dedicated-server-manager-app"
-version = "0.1.0"
+version = "0.1.3"
 dependencies = [
  "dune-manager-core",
  "serde",

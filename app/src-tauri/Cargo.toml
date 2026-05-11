@@ -1,6 +1,6 @@
 [package]
 name = "dune-dedicated-server-manager-app"
-version = "0.1.0"
+version = "0.1.3"
 description = "Desktop shell for Dune Dedicated Server Manager"
 authors = ["Dune Dedicated Server Manager"]
 edition = "2021"

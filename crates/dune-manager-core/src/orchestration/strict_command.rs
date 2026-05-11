@@ -8,6 +8,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::{
     errors::{command_failure, failure},
     models::CommandResult,
+    shell::suppress_console_window,
 };
 
 /// Host execution bridge used by an operation.
@@ -62,7 +63,9 @@ pub struct StrictCommandRunner;
 impl StrictCommandRunner {
     /// Runs a command and returns trimmed stdout text.
     pub fn run_text(&self, spec: &StrictCommandSpec) -> CommandResult<String> {
-        let output = Command::new(&spec.program)
+        let mut command = Command::new(&spec.program);
+        suppress_console_window(&mut command);
+        let output = command
             .args(&spec.args)
             .stdin(Stdio::null())
             .output()

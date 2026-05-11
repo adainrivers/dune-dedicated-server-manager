@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     errors::{command_failure, failure},
     models::CommandResult,
-    shell::{ps_single_quoted, run_powershell},
+    shell::{ps_single_quoted, run_powershell, suppress_console_window},
 };
 
 const STEAMCMD_URL: &str = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip";
@@ -199,7 +199,9 @@ impl Toolchain {
             return Err(failure("SteamCMD is not installed"));
         }
         let install_dir = install_dir.as_ref();
-        let output = Command::new(&steamcmd.executable)
+        let mut command = Command::new(&steamcmd.executable);
+        suppress_console_window(&mut command);
+        let output = command
             .args([
                 "+@ShutdownOnFailedCommand",
                 "1",

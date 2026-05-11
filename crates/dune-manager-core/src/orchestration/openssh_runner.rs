@@ -8,6 +8,7 @@ use crate::{
     errors::{command_failure, failure},
     models::CommandResult,
     orchestration::{RemoteCommandRunner, StrictCommandSpec},
+    shell::suppress_console_window,
 };
 
 /// Connection settings for invoking OpenSSH against the guest VM.
@@ -104,7 +105,9 @@ impl OpenSshRunner {
         args.push(self.target.destination());
         args.push(remote_command.to_string());
 
-        let mut child = Command::new(&self.target.ssh_path)
+        let mut command = Command::new(&self.target.ssh_path);
+        suppress_console_window(&mut command);
+        let mut child = command
             .args(args)
             .stdin(if stdin_body.is_some() {
                 Stdio::piped()
