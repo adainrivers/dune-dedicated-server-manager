@@ -9,6 +9,8 @@
 
 /// Non-interactive command-line entry point and argument dispatch.
 pub mod cli;
+/// PostgreSQL access for the Dune game database.
+pub mod database;
 /// Shared error constructors and JSON parsing helpers.
 pub mod errors;
 /// Common command result types used by core operations.

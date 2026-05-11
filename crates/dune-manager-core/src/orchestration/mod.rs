@@ -9,6 +9,8 @@
 pub mod battlegroup_kubernetes;
 /// High-level battlegroup lifecycle orchestration.
 pub mod battlegroup_management;
+/// Guest experimental swap and low-memory BattleGroup profile support.
+pub mod experimental_swap;
 /// Guest bootstrap planning and sequencing.
 pub mod guest_bootstrap;
 /// SSH implementation of the guest bootstrap provider.
@@ -23,6 +25,8 @@ pub mod hyperv_initial_setup;
 pub mod hyperv_lifecycle;
 /// Hyper-V VM import and preparation orchestration.
 pub mod hyperv_setup;
+/// BattleGroup map instance partition management.
+pub mod instance_management;
 /// SSH-backed Kubernetes provider.
 pub mod kubernetes_ssh;
 /// SSH-based Manager API installation and health checks.
@@ -38,6 +42,7 @@ pub mod vendor_flows;
 
 pub use battlegroup_kubernetes::*;
 pub use battlegroup_management::*;
+pub use experimental_swap::*;
 pub use guest_bootstrap::*;
 pub use guest_bootstrap_ssh::*;
 pub use guest_ssh::*;
@@ -45,6 +50,7 @@ pub use hyperv_bridge::*;
 pub use hyperv_initial_setup::*;
 pub use hyperv_lifecycle::*;
 pub use hyperv_setup::*;
+pub use instance_management::*;
 pub use kubernetes_ssh::*;
 pub use manager_api_installer::*;
 pub use openssh_runner::*;

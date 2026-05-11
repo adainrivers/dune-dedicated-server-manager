@@ -3,17 +3,19 @@ use serde_json::{json, Value};
 
 use crate::orchestration::{GuestProvider, HostProvider};
 use crate::{
+    database::{DuneDatabase, DuneDatabaseConfig, DEFAULT_DUNE_DATABASE_PORT},
     errors::failure,
     models::{CommandFailure, CommandResult},
     orchestration::{
         battlegroup_command_catalog, detect_player_address_candidates, hyperv_initial_setup_flow,
         BattlegroupManagementOrchestrator, BattlegroupRef, BattlegroupUpdateOrchestrator,
-        GuestBootstrapOrchestrator, GuestBootstrapPlan, GuestNetworkConfig,
-        HyperVVmLifecycleOrchestrator, HyperVVmSetupOrchestrator, HyperVVmSetupRequest,
-        ManagerApiInstallRequest, ManagerApiInstaller, MemoryProfile, OpenSshGuestProvider,
-        OpenSshRunner, OpenSshTarget, OrchestrationEvent, SshGuestBootstrapProvider,
-        StrictPowerShellHyperV, StructuredBattlegroupOps, StructuredKubectl, VecOperationSink,
-        VmProvider, DEFAULT_VM_DISK_BYTES,
+        ExperimentalSwapOrchestrator, ExperimentalSwapRequest, GuestBootstrapOrchestrator,
+        GuestBootstrapPlan, GuestNetworkConfig, HyperVVmLifecycleOrchestrator,
+        HyperVVmSetupOrchestrator, HyperVVmSetupRequest, InstanceMap, ManagerApiInstallRequest,
+        ManagerApiInstaller, MapInstanceOrchestrator, MemoryProfile, OpenSshGuestProvider,
+        OpenSshRunner, OpenSshTarget, OrchestrationEvent, SetMapInstancesRequest,
+        SshGuestBootstrapProvider, StrictPowerShellHyperV, StructuredBattlegroupOps,
+        StructuredKubectl, VecOperationSink, VmProvider, DEFAULT_VM_DISK_BYTES,
     },
     toolchain::{ManagedTool, Toolchain},
 };
@@ -70,6 +72,11 @@ fn run_cli(args: Vec<String>) -> CommandResult<Value> {
             )
         }
         ["host", "adapters"] => to_json(StrictPowerShellHyperV::new().active_physical_adapters()?),
+        ["db", "ping"] => to_json(DuneDatabase::new(db_config(&args)?).health()?),
+        ["db", "world-partitions"] => {
+            let map = args.optional("--map");
+            to_json(DuneDatabase::new(db_config(&args)?).world_partitions(map.as_deref())?)
+        }
         ["tools", "status"] => {
             let toolchain = toolchain(&args)?;
             if let Some(tool) = args.optional("--tool") {
@@ -198,9 +205,55 @@ fn run_cli(args: Vec<String>) -> CommandResult<Value> {
                     .unwrap_or_else(|| "Europe Test".to_string()),
                 token,
             )?;
-            let provider = SshGuestBootstrapProvider::new(ssh_runner(&args)?);
+            let runner = ssh_runner(&args)?;
+            let provider = SshGuestBootstrapProvider::new(runner.clone());
             let mut sink = VecOperationSink::default();
             let result = GuestBootstrapOrchestrator::new(provider).run(&plan, &mut sink)?;
+            if args.has_flag("--enable-experimental-swap") {
+                let mut request = ExperimentalSwapRequest::new(
+                    result.namespace.clone(),
+                    result.battlegroup_name.clone(),
+                );
+                request.swap_size_gib = args
+                    .optional_u64("--experimental-swap-size-gib")?
+                    .unwrap_or(30);
+                request.restart_k3s = !args.has_flag("--experimental-swap-no-restart-k3s");
+                let swap = ExperimentalSwapOrchestrator::new(runner).enable(&request, &mut sink)?;
+                return to_json(OperationOutput {
+                    ok: true,
+                    result: json!({
+                        "bootstrap": result,
+                        "experimentalSwap": swap,
+                    }),
+                    events: sink.events,
+                });
+            }
+            to_json(OperationOutput {
+                ok: true,
+                result,
+                events: sink.events,
+            })
+        }
+        ["guest", "experimental-swap", "status"] => {
+            let battlegroup = optional_battlegroup_ref(&args)?;
+            let orchestrator = ExperimentalSwapOrchestrator::new(ssh_runner(&args)?);
+            let status = orchestrator.status(
+                battlegroup
+                    .as_ref()
+                    .map(|bg| (bg.namespace.as_str(), bg.name.as_str())),
+            )?;
+            to_json(status)
+        }
+        ["guest", "experimental-swap", "enable"] => {
+            let mut request = ExperimentalSwapRequest::new(
+                args.required("--namespace")?,
+                args.required("--name")?,
+            );
+            request.swap_size_gib = args.optional_u64("--swap-size-gib")?.unwrap_or(30);
+            request.restart_k3s = !args.has_flag("--no-restart-k3s");
+            let mut sink = VecOperationSink::default();
+            let result = ExperimentalSwapOrchestrator::new(ssh_runner(&args)?)
+                .enable(&request, &mut sink)?;
             to_json(OperationOutput {
                 ok: true,
                 result,
@@ -240,6 +293,27 @@ fn run_cli(args: Vec<String>) -> CommandResult<Value> {
             let region = args.required("--region")?;
             bg_ops(&args)?.patch_region(&bg, &region)?;
             Ok(json!({ "ok": true }))
+        }
+        ["bg", "instances", "set"] => {
+            let bg = battlegroup_ref(&args)?;
+            let map = InstanceMap::parse(&args.required("--map")?)?;
+            let count = usize::try_from(args.required_u64("--count")?)
+                .map_err(|_| failure("--count is too large"))?;
+            let mut request = SetMapInstancesRequest::new(bg, map, count);
+            request.pvp_partition_ids =
+                optional_partition_id_list(&args.optional("--pvp-partitions"))?;
+            let result =
+                MapInstanceOrchestrator::new(ssh_runner(&args)?).set_instances(&request)?;
+            let restart = if args.has_flag("--restart") {
+                Some(bg_lifecycle(&args, "restart")?)
+            } else {
+                None
+            };
+            Ok(json!({
+                "ok": true,
+                "result": result,
+                "restart": restart,
+            }))
         }
         ["bg", "pods"] => {
             let namespace = args.required("--namespace")?;
@@ -363,11 +437,93 @@ fn optional_port(args: &CliArgs, name: &str) -> CommandResult<Option<u16>> {
         .transpose()
 }
 
+fn optional_partition_id_list(value: &Option<String>) -> CommandResult<Option<Vec<i64>>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.trim().is_empty()
+        || matches!(
+            value.to_ascii_lowercase().as_str(),
+            "none" | "clear" | "pve"
+        )
+    {
+        return Ok(Some(Vec::new()));
+    }
+    let ids = value
+        .split([',', ';', ' '])
+        .filter(|part| !part.trim().is_empty())
+        .map(|part| {
+            part.trim()
+                .parse::<i64>()
+                .map_err(|_| failure(format!("Invalid partition id: {part}")))
+        })
+        .collect::<CommandResult<Vec<_>>>()?;
+    Ok(Some(ids))
+}
+
+fn db_config(args: &CliArgs) -> CommandResult<DuneDatabaseConfig> {
+    let host = args.required("--db-host")?;
+    let port = optional_port(args, "--db-port")?.unwrap_or(DEFAULT_DUNE_DATABASE_PORT);
+    let database = args
+        .optional("--db-name")
+        .unwrap_or_else(|| "dune".to_string());
+    let user = args
+        .optional("--db-user")
+        .unwrap_or_else(|| "dune".to_string());
+    let password = db_password(args)?.unwrap_or_else(|| "dune".to_string());
+    Ok(DuneDatabaseConfig {
+        host,
+        port,
+        database,
+        user,
+        password,
+    })
+}
+
+fn db_password(args: &CliArgs) -> CommandResult<Option<String>> {
+    if let Some(value) = args.optional("--db-password") {
+        return Ok(Some(value));
+    }
+    if let Some(path) = args.optional("--db-password-file") {
+        let text = std::fs::read_to_string(&path).map_err(|err| {
+            failure(format!(
+                "Failed to read database password file {path}: {err}"
+            ))
+        })?;
+        let password = text.trim_end_matches(['\r', '\n']).to_string();
+        if password.is_empty() {
+            return Err(failure("Database password file is empty"));
+        }
+        return Ok(Some(password));
+    }
+    if let Some(name) = args.optional("--db-password-env") {
+        let password = std::env::var(&name)
+            .map_err(|_| failure(format!("Environment variable {name} is not set")))?;
+        if password.is_empty() {
+            return Err(failure(format!("Environment variable {name} is empty")));
+        }
+        return Ok(Some(password));
+    }
+    Ok(None)
+}
+
 fn battlegroup_ref(args: &CliArgs) -> CommandResult<BattlegroupRef> {
     Ok(BattlegroupRef {
         namespace: args.required("--namespace")?,
         name: args.required("--name")?,
     })
+}
+
+fn optional_battlegroup_ref(args: &CliArgs) -> CommandResult<Option<BattlegroupRef>> {
+    match (args.optional("--namespace"), args.optional("--name")) {
+        (Some(namespace), Some(name))
+            if !namespace.trim().is_empty() && !name.trim().is_empty() =>
+        {
+            Ok(Some(BattlegroupRef { namespace, name }))
+        }
+        (None, None) => Ok(None),
+        _ => Err(failure("--namespace and --name must be provided together")),
+    }
 }
 
 fn ssh_guest_provider(args: &CliArgs) -> CommandResult<OpenSshGuestProvider> {
@@ -428,7 +584,15 @@ impl CliArgs {
         while index < self.args.len() {
             let arg = &self.args[index];
             if arg.starts_with("--") {
-                index += 2;
+                if self
+                    .args
+                    .get(index + 1)
+                    .is_some_and(|next| !next.starts_with("--"))
+                {
+                    index += 2;
+                } else {
+                    index += 1;
+                }
             } else {
                 values.push(arg.as_str());
                 index += 1;
@@ -462,6 +626,11 @@ impl CliArgs {
                     .map_err(|_| failure(format!("{name} must be an unsigned integer")))
             })
             .transpose()
+    }
+
+    fn required_u64(&self, name: &str) -> CommandResult<u64> {
+        self.optional_u64(name)?
+            .ok_or_else(|| failure(format!("Missing required argument {name}")))
     }
 
     fn token(&self) -> CommandResult<String> {
@@ -499,6 +668,8 @@ fn usage() -> Vec<&'static str> {
         "dune-manager-cli host readiness",
         "dune-manager-cli host drives [--min-gb 100]",
         "dune-manager-cli host adapters",
+        "dune-manager-cli db ping --db-host IP [--db-port 15432] [--db-name dune] [--db-user dune] [--db-password PASSWORD | --db-password-file PATH | --db-password-env NAME]",
+        "dune-manager-cli db world-partitions --db-host IP [--map MAP] [--db-port 15432] [--db-name dune] [--db-user dune] [--db-password PASSWORD | --db-password-file PATH | --db-password-env NAME]",
         "dune-manager-cli tools status [--tool steamcmd|openssh] [--tools-root PATH]",
         "dune-manager-cli tools install --tool steamcmd|openssh|all [--tools-root PATH] [--force] [--source-url URL]",
         "dune-manager-cli tools path --tool steamcmd|openssh [--tools-root PATH]",
@@ -511,11 +682,14 @@ fn usage() -> Vec<&'static str> {
         "dune-manager-cli guest player-candidates --ssh PATH --key PATH --host IP [--user dune]",
         "dune-manager-cli guest write-player-settings --ssh PATH --key PATH --host IP --player-ip IP [--user dune]",
         "dune-manager-cli guest apply-static-network --ssh PATH --key PATH --host IP --address-cidr IP/PREFIX --gateway IP --dns IP [--interface eth0] [--user dune]",
-        "dune-manager-cli guest bootstrap --ssh PATH --key PATH --host IP (--token JWT | --token-file PATH | --token-env NAME) --player-ip IP --world-name NAME [--region \"Europe Test\"] [--user dune]",
+        "dune-manager-cli guest bootstrap --ssh PATH --key PATH --host IP (--token JWT | --token-file PATH | --token-env NAME) --player-ip IP --world-name NAME [--region \"Europe Test\"] [--enable-experimental-swap] [--experimental-swap-size-gib 30] [--experimental-swap-no-restart-k3s] [--user dune]",
+        "dune-manager-cli guest experimental-swap status --ssh PATH --key PATH --host IP [--namespace NS --name BG] [--user dune]",
+        "dune-manager-cli guest experimental-swap enable --ssh PATH --key PATH --host IP --namespace NS --name BG [--swap-size-gib 30] [--no-restart-k3s] [--user dune]",
         "dune-manager-cli bg list --ssh PATH --key PATH --host IP [--user dune]",
         "dune-manager-cli bg status --ssh PATH --key PATH --host IP --namespace NS --name BG [--user dune]",
         "dune-manager-cli bg start|stop|restart --ssh PATH --key PATH --host IP --namespace NS --name BG [--director-timeout 60]",
         "dune-manager-cli bg patch-region --ssh PATH --key PATH --host IP --namespace NS --name BG --region \"Europe Test\"",
+        "dune-manager-cli bg instances set --ssh PATH --key PATH --host IP --namespace NS --name BG --map survival-1|deep-desert --count N [--pvp-partitions 29,30|none] [--restart]",
         "dune-manager-cli bg pods --ssh PATH --key PATH --host IP --namespace NS",
         "dune-manager-cli bg pod-shell-spec --ssh PATH --key PATH --host IP --namespace NS --pod POD",
         "dune-manager-cli bg export-logs --ssh PATH --key PATH --host IP --namespace NS",
