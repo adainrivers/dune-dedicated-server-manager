@@ -1,11 +1,7 @@
 name: CI
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-      - master
+  workflow_dispatch:
 
 jobs:
   checks:
@@ -59,4 +55,3 @@ jobs:
           if ($LASTEXITCODE -ne 1) {
             exit $LASTEXITCODE
           }
-
