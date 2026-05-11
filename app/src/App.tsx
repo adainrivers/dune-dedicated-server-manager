@@ -410,6 +410,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!selectedServerName) return;
+    if (duneVms.some((candidate) => candidate.vm.name === selectedServerName)) return;
+    setSelectedServerName(null);
+    if (activePage === "server-detail") setActivePage("home");
+  }, [activePage, duneVms, selectedServerName]);
+
+  useEffect(() => {
     if (import.meta.env.DEV) {
       appendInitRow(log.debug("updates", "Automatic update checks are disabled in development builds."));
       return;
@@ -511,7 +518,16 @@ export function App() {
       scaling="95%"
     >
       <Flex direction="column" className="app-root">
-        <Header activePage={activePage} selectedServerName={selectedServerName} onNavigate={setActivePage} />
+        <Header
+          activePage={activePage}
+          selectedServerName={selectedServerName}
+          servers={duneVms}
+          onNavigate={setActivePage}
+          onOpenServer={(name) => {
+            setSelectedServerName(name);
+            setActivePage("server-detail");
+          }}
+        />
         <Separator size="4" />
         <Box className="app-main has-log">
           {activePage === "home" ? (
@@ -578,11 +594,15 @@ export function App() {
 function Header({
   activePage,
   selectedServerName,
+  servers,
   onNavigate,
+  onOpenServer,
 }: {
   activePage: PageId;
   selectedServerName: string | null;
+  servers: DuneVmCandidate[];
   onNavigate: (page: PageId) => void;
+  onOpenServer: (name: string) => void;
 }) {
   return (
     <Flex asChild align="center" justify="between" p="4">
@@ -595,7 +615,9 @@ function Header({
           <TopNav
             activePage={activePage}
             selectedServerName={selectedServerName}
+            servers={servers}
             onNavigate={onNavigate}
+            onOpenServer={onOpenServer}
           />
         </Flex>
       </header>
@@ -607,10 +629,14 @@ function TopNav({
   activePage,
   onNavigate,
   selectedServerName,
+  servers,
+  onOpenServer,
 }: {
   activePage: PageId;
   onNavigate: (page: PageId) => void;
   selectedServerName: string | null;
+  servers: DuneVmCandidate[];
+  onOpenServer: (name: string) => void;
 }) {
   return (
     <Box asChild>
@@ -629,18 +655,19 @@ function TopNav({
               {page.label}
             </TabNav.Link>
           ))}
-          {selectedServerName ? (
+          {servers.map((candidate) => (
             <TabNav.Link
+              key={candidate.vm.name}
               href="#"
-              active={activePage === "server-detail"}
+              active={activePage === "server-detail" && selectedServerName === candidate.vm.name}
               onClick={(event) => {
                 event.preventDefault();
-                onNavigate("server-detail");
+                onOpenServer(candidate.vm.name);
               }}
             >
-              {selectedServerName}
+              {candidate.vm.name}
             </TabNav.Link>
-          ) : null}
+          ))}
         </TabNav.Root>
       </nav>
     </Box>
