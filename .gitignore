@@ -47,6 +47,8 @@ app/vm/
 app/vm-*/
 app/src-tauri/dune-server/
 app/src-tauri/vm/
+app/src-tauri/resources/manager-api/dune-manager-api
+app/src-tauri/resources/manager-api/dune-manager-api.exe
 vm/
 *.pem
 *.key

@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, for example 0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  manager-api:
+    name: Build Manager API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build Linux Manager API
+        run: cargo build -p dune-manager-api --target x86_64-unknown-linux-musl --release
+
+      - name: Upload Manager API artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manager-api-x86_64-unknown-linux-musl
+          path: target/x86_64-unknown-linux-musl/release/dune-manager-api
+          if-no-files-found: error
+
+  windows-app:
+    name: Build Windows app
+    runs-on: windows-latest
+    needs: manager-api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Resolve release version
+        shell: pwsh
+        env:
+          WORKFLOW_VERSION: ${{ inputs.version }}
+        run: |
+          $version = $env:WORKFLOW_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+          }
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Release version could not be resolved."
+          }
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_TAG=v$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Download Manager API artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: manager-api-x86_64-unknown-linux-musl
+          path: app/src-tauri/resources/manager-api
+
+      - name: Prepare release config
+        shell: pwsh
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY || secrets.TAURI_UPDATER_PUBLIC_KEY }}
+        run: |
+          $version = $env:RELEASE_VERSION
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_UPDATER_PUBLIC_KEY)) {
+            throw "Set TAURI_UPDATER_PUBLIC_KEY as a GitHub Actions variable or secret before releasing."
+          }
+
+          Push-Location app
+          npm version --no-git-tag-version --allow-same-version $version
+          Pop-Location
+
+          $tauriConfigPath = "app/src-tauri/tauri.conf.json"
+          $config = Get-Content $tauriConfigPath -Raw
+          $config = $config.Replace('"version": "0.1.0"', ('"version": "' + $version + '"'))
+          $config = $config.Replace("__TAURI_UPDATER_PUBLIC_KEY__", $env:TAURI_UPDATER_PUBLIC_KEY)
+          $config = $config.Replace("__GITHUB_REPOSITORY__", "${{ github.repository }}")
+          Set-Content -Path $tauriConfigPath -Value $config -NoNewline
+
+          $cargoTomlPath = "app/src-tauri/Cargo.toml"
+          $cargoToml = Get-Content $cargoTomlPath -Raw
+          $cargoToml = $cargoToml -replace 'version = "[^"]+"', ('version = "' + $version + '"')
+          Set-Content -Path $cargoTomlPath -Value $cargoToml -NoNewline
+
+          Copy-Item app/src-tauri/resources/manager-api/dune-manager-api app/src-tauri/resources/manager-api/dune-manager-api-x86_64-unknown-linux-musl -Force
+
+      - name: Build and publish Tauri release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: "Dune Dedicated Server Manager ${{ env.RELEASE_TAG }}"
+          releaseBody: "Windows installer, updater metadata, and bundled VM Manager API binary."
+          releaseDraft: false
+          prerelease: false
+
+      - name: Upload Manager API binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: app/src-tauri/resources/manager-api/dune-manager-api-x86_64-unknown-linux-musl

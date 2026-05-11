@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  checks:
+    name: Workspace checks
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Rust format
+        run: cargo fmt --all -- --check
+
+      - name: Rust check
+        run: cargo check --workspace
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Core API docs
+        run: cargo doc -p dune-manager-core --no-deps
+
+      - name: Frontend build
+        working-directory: app
+        run: npm run build
+
+      - name: Tauri shell check
+        run: cargo check -p dune-dedicated-server-manager-app
+
+      - name: Secret and machine-constant scan
+        shell: pwsh
+        run: |
+          rg -n -S "I:|AutoUpdate|192\.168\.2\.|menna|dune-awakening|C:\\WINDOWS\\System32\\OpenSSH|C:\\Windows\\System32\\OpenSSH|change-me-before-exposing|c05564d|d177d3bbc40be761|qRmQx|FuncomLiveServices__ServiceAuthToken" . -g "!app/**/target/**" -g "!crates/**/target/**" -g "!manager-api/target/**" -g "!target/**" -g "!app/node_modules/**" -g "!app/dist/**" -g "!*.md" -g "!app/steamcmd/**" -g "!app/dune-server/**" -g "!app/vm/**" -g "!app/vm-*/**" -g "!vm/**" -g "!.tmp/**"
+          if ($LASTEXITCODE -eq 0) {
+            throw "Secret or machine-specific constant scan found matches."
+          }
+          if ($LASTEXITCODE -ne 1) {
+            exit $LASTEXITCODE
+          }
+

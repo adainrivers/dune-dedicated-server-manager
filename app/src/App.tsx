@@ -2,6 +2,8 @@ import { type ComponentType, type ReactNode, useEffect, useMemo, useRef, useStat
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import {
   AlertDialog,
   Badge,
@@ -106,6 +108,7 @@ type DuneVmCandidate = {
 
 type DetectionState = "detecting" | "ready" | "failed";
 type LogLevel = "debug" | "info" | "warn" | "error";
+type UpdateStatus = "idle" | "checking" | "available" | "current" | "installing" | "relaunching" | "failed";
 
 type LogRow = {
   timestamp: string;
@@ -224,6 +227,10 @@ export function App() {
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [rollbackRunning, setRollbackRunning] = useState(false);
   const [failedRollbackRequest, setFailedRollbackRequest] = useState<RollbackRequest | null>(null);
+  const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>("idle");
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<string | null>(null);
   const [hostReadiness, setHostReadiness] = useState<HostReadiness | null>(null);
   const [driveCandidates, setDriveCandidates] = useState<DriveCandidate[]>([]);
   const [networkAdapters, setNetworkAdapters] = useState<NetworkAdapterCandidate[]>([]);
@@ -254,8 +261,77 @@ export function App() {
     () => duneVms.find((candidate) => candidate.vm.name === selectedServerName) ?? null,
     [duneVms, selectedServerName],
   );
+  const updateCheckInFlight = useRef(false);
   const update = <K extends keyof SetupForm>(key: K, value: SetupForm[K]) => {
     setForm((current) => normalizeSetupForm({ ...current, [key]: value }));
+  };
+  const appendInitRow = (row: LogRow) => {
+    setInitRows((rows) => [...rows, row]);
+  };
+  const checkForAppUpdate = async (source: "startup" | "manual") => {
+    if (updateCheckInFlight.current) return;
+    updateCheckInFlight.current = true;
+    setUpdateStatus("checking");
+    setUpdateProgress(null);
+    appendInitRow(log.info("updates", "Checking for app updates."));
+    try {
+      const nextUpdate = await check();
+      setAvailableUpdate(nextUpdate);
+      if (nextUpdate) {
+        setUpdateStatus("available");
+        appendInitRow(
+          log.info(
+            "updates",
+            `Update ${nextUpdate.version} is available; current version is ${nextUpdate.currentVersion}.`,
+          ),
+        );
+        if (source === "startup") setUpdateDialogOpen(true);
+      } else {
+        setUpdateStatus("current");
+        appendInitRow(log.info("updates", "The app is up to date."));
+      }
+    } catch (err) {
+      setUpdateStatus("failed");
+      appendInitRow(log.warn("updates", errorMessage(err)));
+    } finally {
+      updateCheckInFlight.current = false;
+    }
+  };
+  const installAppUpdate = async () => {
+    if (!availableUpdate) return;
+    let downloaded = 0;
+    let total: number | null = null;
+    setUpdateStatus("installing");
+    setUpdateProgress("Preparing download...");
+    appendInitRow(log.info("updates", `Installing update ${availableUpdate.version}.`));
+    try {
+      await availableUpdate.downloadAndInstall((event: DownloadEvent) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? null;
+          downloaded = 0;
+          setUpdateProgress(total ? `Downloading 0 of ${formatBytes(total)}` : "Downloading update...");
+        }
+        if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setUpdateProgress(
+            total
+              ? `Downloading ${formatBytes(downloaded)} of ${formatBytes(total)}`
+              : `Downloading ${formatBytes(downloaded)}`,
+          );
+        }
+        if (event.event === "Finished") {
+          setUpdateProgress("Installing update...");
+        }
+      });
+      setUpdateStatus("relaunching");
+      setUpdateProgress("Relaunching...");
+      appendInitRow(log.info("updates", "Update installed; relaunching the app."));
+      await relaunch();
+    } catch (err) {
+      setUpdateStatus("failed");
+      setUpdateProgress(null);
+      appendInitRow(log.error("updates", errorMessage(err)));
+    }
   };
 
   useEffect(() => {
@@ -331,6 +407,17 @@ export function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      appendInitRow(log.debug("updates", "Automatic update checks are disabled in development builds."));
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void checkForAppUpdate("startup");
+    }, 1500);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -436,6 +523,11 @@ export function App() {
               networkAdapters={networkAdapters}
               externalIp={externalIp}
               duneVms={duneVms}
+              updateStatus={updateStatus}
+              availableUpdate={availableUpdate}
+              updateProgress={updateProgress}
+              onCheckUpdate={() => void checkForAppUpdate("manual")}
+              onInstallUpdate={() => setUpdateDialogOpen(true)}
               onOpenServer={(name) => {
                 setSelectedServerName(name);
                 setActivePage("server-detail");
@@ -469,6 +561,14 @@ export function App() {
           rollbackRunning={rollbackRunning}
           onOpenChange={setRollbackOpen}
           onRollback={rollback}
+        />
+        <UpdateDialog
+          open={updateDialogOpen}
+          update={availableUpdate}
+          status={updateStatus}
+          progress={updateProgress}
+          onOpenChange={setUpdateDialogOpen}
+          onInstall={() => void installAppUpdate()}
         />
       </Flex>
     </Theme>
@@ -555,6 +655,11 @@ function HomePage({
   networkAdapters,
   externalIp,
   duneVms,
+  updateStatus,
+  availableUpdate,
+  updateProgress,
+  onCheckUpdate,
+  onInstallUpdate,
   onOpenServer,
 }: {
   environmentGate: EnvironmentGate;
@@ -564,6 +669,11 @@ function HomePage({
   networkAdapters: NetworkAdapterCandidate[];
   externalIp: string | null;
   duneVms: DuneVmCandidate[];
+  updateStatus: UpdateStatus;
+  availableUpdate: Update | null;
+  updateProgress: string | null;
+  onCheckUpdate: () => void;
+  onInstallUpdate: () => void;
   onOpenServer: (name: string) => void;
 }) {
   const vmDetectionReady = vmDetection === "ready";
@@ -625,6 +735,18 @@ function HomePage({
             label="Dune VMs"
             value={vmDetectionReady ? `${duneVms.length} found` : vmDetection === "failed" ? "Failed" : "Checking"}
             tone={vmDetectionReady ? "green" : vmDetection === "failed" ? "red" : "amber"}
+          />
+          <InfoActionRow
+            label="App Update"
+            value={updateLabel(updateStatus, availableUpdate, updateProgress)}
+            tone={updateTone(updateStatus)}
+            actionLabel={availableUpdate ? "Install" : "Check"}
+            disabled={
+              updateStatus === "checking" ||
+              updateStatus === "installing" ||
+              updateStatus === "relaunching"
+            }
+            onAction={availableUpdate ? onInstallUpdate : onCheckUpdate}
           />
         </Box>
 
@@ -843,6 +965,39 @@ function InfoRow({
       <Badge color={tone} variant="soft">
         {tone === "green" ? "OK" : tone === "red" ? "Issue" : "Check"}
       </Badge>
+    </Grid>
+  );
+}
+
+function InfoActionRow({
+  label,
+  value,
+  tone,
+  actionLabel,
+  disabled,
+  onAction,
+}: {
+  label: string;
+  value: string;
+  tone: "green" | "amber" | "red";
+  actionLabel: string;
+  disabled: boolean;
+  onAction: () => void;
+}) {
+  return (
+    <Grid columns="160px 1fr auto auto" gap="3" align="center" className="info-row">
+      <Text as="div" size="2" color="gray">
+        {label}
+      </Text>
+      <Text as="div" size="2" className="mono metric-value">
+        {value}
+      </Text>
+      <Badge color={tone} variant="soft">
+        {tone === "green" ? "OK" : tone === "red" ? "Issue" : "Check"}
+      </Badge>
+      <Button size="1" variant="soft" color="bronze" disabled={disabled} onClick={onAction}>
+        {actionLabel}
+      </Button>
     </Grid>
   );
 }
@@ -1618,6 +1773,35 @@ function logEntry(level: LogLevel, scope: string, message: string): LogRow {
   };
 }
 
+function updateLabel(status: UpdateStatus, availableUpdate: Update | null, progress: string | null): string {
+  if (status === "checking") return "Checking";
+  if (status === "installing") return progress ?? "Installing";
+  if (status === "relaunching") return progress ?? "Relaunching";
+  if (status === "failed") return "Check failed";
+  if (availableUpdate) return `${availableUpdate.version} available`;
+  if (status === "current") return "Up to date";
+  return "Not checked";
+}
+
+function updateTone(status: UpdateStatus): "green" | "amber" | "red" {
+  if (status === "failed") return "red";
+  if (status === "current") return "green";
+  return "amber";
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return "Operation failed.";
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
 function networkStatusLabel(status: DetectionState): string {
   if (status === "detecting") return "Detecting adapters...";
   if (status === "failed") return "Detection failed";
@@ -1743,6 +1927,51 @@ function RollbackDialog({
           <AlertDialog.Cancel disabled={rollbackRunning}>Keep artifacts</AlertDialog.Cancel>
           <AlertDialog.Action disabled={rollbackRunning} onClick={onRollback}>
             {rollbackRunning ? "Rolling back..." : "Rollback"}
+          </AlertDialog.Action>
+        </Flex>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
+  );
+}
+
+function UpdateDialog({
+  open,
+  update,
+  status,
+  progress,
+  onOpenChange,
+  onInstall,
+}: {
+  open: boolean;
+  update: Update | null;
+  status: UpdateStatus;
+  progress: string | null;
+  onOpenChange: (open: boolean) => void;
+  onInstall: () => void;
+}) {
+  const busy = status === "installing" || status === "relaunching";
+
+  return (
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Content maxWidth="520px">
+        <AlertDialog.Title>Install app update?</AlertDialog.Title>
+        <AlertDialog.Description size="2">
+          {update
+            ? `Version ${update.version} is available. The app will download the signed installer, install it, and relaunch.`
+            : "No update is currently selected."}
+        </AlertDialog.Description>
+        {update?.body ? (
+          <TextArea mt="3" value={update.body} readOnly rows={7} />
+        ) : null}
+        {progress ? (
+          <Text as="p" size="2" color="gray" mt="3" className="mono">
+            {progress}
+          </Text>
+        ) : null}
+        <Flex gap="3" mt="4" justify="end">
+          <AlertDialog.Cancel disabled={busy}>Later</AlertDialog.Cancel>
+          <AlertDialog.Action disabled={!update || busy} onClick={onInstall}>
+            {busy ? "Installing..." : "Install update"}
           </AlertDialog.Action>
         </Flex>
       </AlertDialog.Content>
