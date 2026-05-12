@@ -799,6 +799,8 @@
         item.backup,
         item.action,
         item.originator,
+        item.latestEvent?.reason,
+        item.latestEvent?.message,
       ]
         .join(" ")
         .toLowerCase()
@@ -1290,6 +1292,12 @@
                     <span>Time</span><b>{formatBackupTime(item.finishTime || item.startTime || item.createdAt)}</b>
                     {#if item.duration}<span>Duration</span><b>{item.duration}</b>{/if}
                   </div>
+                  {#if item.latestEvent}
+                    <p class:warning={item.latestEvent.eventType === "Warning"} class="database-event">
+                      <strong>{item.latestEvent.reason || item.latestEvent.eventType}</strong>
+                      {item.latestEvent.message}
+                    </p>
+                  {/if}
                 </article>
               {/each}
             </div>

@@ -51,7 +51,7 @@ pub struct WorkloadsResponse {
     pub services: Vec<ServiceSummary>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventSummary {
     pub name: String,
@@ -109,6 +109,7 @@ pub struct DatabaseMaintenanceItem {
     pub backup: Option<String>,
     pub action: Option<String>,
     pub originator: Option<String>,
+    pub latest_event: Option<EventSummary>,
 }
 
 #[derive(Debug, Serialize)]

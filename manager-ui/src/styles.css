@@ -841,6 +841,26 @@ header,
   white-space: nowrap;
 }
 
+.database-event {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.65rem 0.7rem;
+  border-radius: 7px;
+  color: #d9d1c4;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.database-event.warning {
+  color: #ffe3a9;
+  background: rgba(105, 78, 29, 0.36);
+}
+
+.database-event strong {
+  display: inline;
+  margin-right: 0.4rem;
+  color: #e9c37e;
+}
+
 .metric-card,
 .panel {
   padding: 1rem;

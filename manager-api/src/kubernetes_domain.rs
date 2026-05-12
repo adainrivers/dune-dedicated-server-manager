@@ -111,13 +111,19 @@ pub async fn list_database_maintenance(state: &AppState) -> Result<DatabaseMaint
     let capability = database_backup_capability(state)
         .await
         .unwrap_or_else(|err| (false, err.message));
-    let (backups, schedules, restores, migrations, operations) = tokio::try_join!(
+    let (mut backups, mut schedules, mut restores, mut migrations, mut operations) = tokio::try_join!(
         list_database_resource(state, "DatabaseBackup", "databasebackups"),
         list_database_resource(state, "DatabaseBackupSchedule", "databasebackupschedules"),
         list_database_resource(state, "DatabaseRestore", "databaserestores"),
         list_database_resource(state, "DatabaseMigrate", "databasemigrates"),
         list_database_resource(state, "DatabaseOperation", "databaseoperations"),
     )?;
+    let events = list_events(state, 500).await.unwrap_or_default();
+    attach_latest_events(&mut backups, &events);
+    attach_latest_events(&mut schedules, &events);
+    attach_latest_events(&mut restores, &events);
+    attach_latest_events(&mut migrations, &events);
+    attach_latest_events(&mut operations, &events);
 
     Ok(DatabaseMaintenanceResponse {
         namespace: state.namespace.clone(),
@@ -650,6 +656,16 @@ fn database_maintenance_item(kind: &str, item: DynamicObject) -> DatabaseMainten
         backup: optional_string(&data["spec"]["backup"]),
         action: optional_string(&data["spec"]["action"]),
         originator: optional_string(&data["spec"]["originator"]),
+        latest_event: None,
+    }
+}
+
+fn attach_latest_events(items: &mut [DatabaseMaintenanceItem], events: &[EventSummary]) {
+    for item in items {
+        item.latest_event = events
+            .iter()
+            .find(|event| event.involved_kind == item.kind && event.involved_name == item.name)
+            .cloned();
     }
 }
 
@@ -1187,6 +1203,7 @@ mod tests {
         assert_eq!(summary.identifier.as_deref(), Some("base-20260512"));
         assert_eq!(summary.schedule.as_deref(), Some("15 3 * * *"));
         assert_eq!(summary.suspended, Some(false));
+        assert!(summary.latest_event.is_none());
     }
 
     #[test]
@@ -1228,6 +1245,48 @@ mod tests {
 
         assert!(!database_physical_backups_enabled(&disabled));
         assert!(database_physical_backups_enabled(&enabled));
+    }
+
+    #[test]
+    fn attaches_latest_database_maintenance_events() {
+        let mut items = vec![DatabaseMaintenanceItem {
+            name: "backup-a".to_string(),
+            kind: "DatabaseBackup".to_string(),
+            battle_group: None,
+            phase: Some("Failed".to_string()),
+            created_at: None,
+            start_time: None,
+            finish_time: None,
+            duration: None,
+            identifier: None,
+            schedule: None,
+            suspended: None,
+            backup: None,
+            action: None,
+            originator: None,
+            latest_event: None,
+        }];
+        let events = vec![EventSummary {
+            name: "backup-a.1".to_string(),
+            event_type: "Warning".to_string(),
+            reason: "BackupsDisabled".to_string(),
+            message: "The target database has not enabled physical backups".to_string(),
+            involved_kind: "DatabaseBackup".to_string(),
+            involved_name: "backup-a".to_string(),
+            count: 1,
+            first_seen: None,
+            last_seen: Some("2026-05-12T10:00:00Z".to_string()),
+        }];
+
+        attach_latest_events(&mut items, &events);
+
+        assert_eq!(
+            items[0]
+                .latest_event
+                .as_ref()
+                .map(|event| event.reason.as_str()),
+            Some("BackupsDisabled")
+        );
     }
 
     #[test]

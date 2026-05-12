@@ -104,6 +104,7 @@ export type DatabaseMaintenanceItem = {
   backup?: string;
   action?: string;
   originator?: string;
+  latestEvent?: EventSummary;
 };
 
 export type DatabaseMaintenanceResponse = {
