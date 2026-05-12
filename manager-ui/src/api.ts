@@ -138,6 +138,19 @@ export type UserSettingsUpdateResponse = {
   restartRecommended: boolean;
 };
 
+export type TelemetryEnvelope = {
+  eventType: "snapshot" | "error";
+  timeUnixMs: number;
+  payload: TelemetrySnapshot | { message?: string };
+};
+
+export type TelemetrySnapshot = {
+  namespace: string;
+  battlegroups: BattlegroupSummary[];
+  pods: PodSummary[];
+  services: unknown[];
+};
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...init,

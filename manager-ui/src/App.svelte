@@ -8,6 +8,8 @@
     type LogsResponse,
     type Overview,
     type Session,
+    type TelemetryEnvelope,
+    type TelemetrySnapshot,
     type UserSettingsCatalog,
     type UserSettingsFile,
     type UserSettingsUpdateResponse,
@@ -41,6 +43,11 @@
   let directorMapDraft = "";
   let directorNotice = "";
   let directorBusy = false;
+  let telemetrySocket: WebSocket | null = null;
+  let telemetryConnected = false;
+  let telemetrySnapshots = 0;
+  let telemetryLastAt = "";
+  let telemetryError = "";
 
   $: battlegroup = overview?.battlegroups[0] ?? null;
   $: pods = overview?.workloads.pods ?? [];
@@ -48,7 +55,10 @@
 
   onMount(async () => {
     await loadSession();
-    if (session) await refresh();
+    if (session) {
+      await refresh();
+      startTelemetry();
+    }
     loading = false;
     const timer = window.setInterval(() => {
       if (session) void refresh(false);
@@ -75,6 +85,7 @@
       });
       token = "";
       await refresh();
+      startTelemetry();
     } catch (err) {
       error = message(err);
     } finally {
@@ -84,6 +95,7 @@
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
+    stopTelemetry();
     session = null;
     overview = null;
     layout = null;
@@ -102,9 +114,73 @@
       }
       if (!settingsCatalog) settingsCatalog = await api<UserSettingsCatalog>("/api/config/user-settings");
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) session = null;
+      if (err instanceof ApiError && err.status === 401) {
+        session = null;
+        stopTelemetry();
+      }
       if (showError) error = message(err);
     }
+  }
+
+  function startTelemetry() {
+    if (!session || telemetrySocket) return;
+    telemetryError = "";
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(`${protocol}//${window.location.host}/api/telemetry`);
+    telemetrySocket = socket;
+
+    socket.onopen = () => {
+      telemetryConnected = true;
+      telemetryError = "";
+    };
+    socket.onclose = () => {
+      if (telemetrySocket === socket) telemetrySocket = null;
+      telemetryConnected = false;
+    };
+    socket.onerror = () => {
+      telemetryError = "Telemetry stream failed.";
+    };
+    socket.onmessage = (event) => {
+      try {
+        const envelope = JSON.parse(event.data) as TelemetryEnvelope;
+        telemetryLastAt = new Date(envelope.timeUnixMs).toLocaleTimeString();
+        if (envelope.eventType === "snapshot") {
+          telemetrySnapshots += 1;
+          applyTelemetrySnapshot(envelope.payload as TelemetrySnapshot);
+        } else {
+          const payload = envelope.payload as { message?: string };
+          telemetryError = payload.message || "Telemetry stream reported an error.";
+        }
+      } catch {
+        telemetryError = "Telemetry payload was not valid JSON.";
+      }
+    };
+  }
+
+  function stopTelemetry() {
+    const socket = telemetrySocket;
+    telemetrySocket = null;
+    telemetryConnected = false;
+    if (socket && socket.readyState <= WebSocket.OPEN) socket.close();
+  }
+
+  function applyTelemetrySnapshot(snapshot: TelemetrySnapshot) {
+    if (!overview) return;
+    overview = {
+      ...overview,
+      battlegroups: snapshot.battlegroups,
+      workloads: {
+        ...overview.workloads,
+        pods: snapshot.pods,
+        services: snapshot.services,
+      },
+      status: {
+        ...overview.status,
+        battlegroups: snapshot.battlegroups.length,
+        pods: snapshot.pods.length,
+        services: snapshot.services.length,
+      },
+    };
   }
 
   async function lifecycle(action: "start" | "stop" | "restart") {
@@ -383,7 +459,17 @@
           <Card label="Pods" value={`${overview?.status.pods ?? 0}`} />
           <Card label="Players" value={`${overview?.players?.active ?? 0}`} />
           <Card label="Director" value={overview?.directorAvailable ? "Reachable" : "Unavailable"} />
+          <Card label="Telemetry" value={telemetryConnected ? "Live" : "Offline"} />
         </div>
+        <section class="panel">
+          <h2>Live Stream</h2>
+          <div class="rows compact">
+            <div class="row"><span>Status</span><b class:good={telemetryConnected}>{telemetryConnected ? "Connected" : "Disconnected"}</b></div>
+            <div class="row"><span>Snapshots</span><b>{telemetrySnapshots}</b></div>
+            <div class="row"><span>Last update</span><b>{telemetryLastAt || "Waiting"}</b></div>
+          </div>
+          {#if telemetryError}<p class="warn">{telemetryError}</p>{/if}
+        </section>
         <section class="panel">
           <h2>Workloads</h2>
           <div class="rows">
