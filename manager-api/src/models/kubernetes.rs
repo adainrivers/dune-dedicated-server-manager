@@ -118,6 +118,9 @@ pub struct DatabaseMaintenanceResponse {
     pub namespace: String,
     pub physical_backups_enabled: bool,
     pub physical_backups_message: String,
+    pub backup_storage_configured: bool,
+    pub backup_storage_message: String,
+    pub backups_ready: bool,
     pub backups: Vec<DatabaseMaintenanceItem>,
     pub schedules: Vec<DatabaseMaintenanceItem>,
     pub restores: Vec<DatabaseMaintenanceItem>,
@@ -130,4 +133,10 @@ pub struct DatabaseMaintenanceResponse {
 pub struct CreateDatabaseBackupRequest {
     pub battle_group: Option<String>,
     pub originator: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnableDatabaseBackupsRequest {
+    pub battle_group: Option<String>,
 }

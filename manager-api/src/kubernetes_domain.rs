@@ -23,6 +23,20 @@ use crate::{
     validation::{validate_kube_name, validate_namespace},
 };
 
+#[derive(Debug, Clone)]
+struct DatabaseBackupCapability {
+    physical_enabled: bool,
+    physical_message: String,
+    storage_configured: bool,
+    storage_message: String,
+}
+
+impl DatabaseBackupCapability {
+    fn ready(&self) -> bool {
+        self.physical_enabled && self.storage_configured
+    }
+}
+
 pub async fn list_pods(state: &AppState) -> Result<Vec<PodSummary>> {
     let pods: Api<Pod> = Api::namespaced(state.client.clone(), &state.namespace);
     let list = pods
@@ -110,7 +124,12 @@ pub async fn list_persistent_volume_claims(
 pub async fn list_database_maintenance(state: &AppState) -> Result<DatabaseMaintenanceResponse> {
     let capability = database_backup_capability(state)
         .await
-        .unwrap_or_else(|err| (false, err.message));
+        .unwrap_or_else(|err| DatabaseBackupCapability {
+            physical_enabled: false,
+            physical_message: err.message.clone(),
+            storage_configured: false,
+            storage_message: err.message,
+        });
     let (mut backups, mut schedules, mut restores, mut migrations, mut operations) = tokio::try_join!(
         list_database_resource(state, "DatabaseBackup", "databasebackups"),
         list_database_resource(state, "DatabaseBackupSchedule", "databasebackupschedules"),
@@ -125,10 +144,14 @@ pub async fn list_database_maintenance(state: &AppState) -> Result<DatabaseMaint
     attach_latest_events(&mut migrations, &events);
     attach_latest_events(&mut operations, &events);
 
+    let backups_ready = capability.ready();
     Ok(DatabaseMaintenanceResponse {
         namespace: state.namespace.clone(),
-        physical_backups_enabled: capability.0,
-        physical_backups_message: capability.1,
+        physical_backups_enabled: capability.physical_enabled,
+        physical_backups_message: capability.physical_message,
+        backup_storage_configured: capability.storage_configured,
+        backup_storage_message: capability.storage_message,
+        backups_ready,
         backups,
         schedules,
         restores,
@@ -183,6 +206,33 @@ pub async fn create_database_backup(
         .await
         .context("failed to create database backup")?;
     Ok(database_maintenance_item("DatabaseBackup", created))
+}
+
+pub async fn enable_database_physical_backups(
+    state: &AppState,
+    battle_group: Option<String>,
+) -> Result<DatabaseMaintenanceResponse, ApiError> {
+    let battle_group = match battle_group {
+        Some(value) if !value.trim().is_empty() => value.trim().to_string(),
+        _ => default_battlegroup_name(state).await?,
+    };
+    validate_kube_name(&battle_group)?;
+    let object = get_battlegroup_object(state, &battle_group).await?;
+    if !database_physical_backups_enabled(&object.data) {
+        let api: Api<DynamicObject> = Api::namespaced_with(
+            state.client.clone(),
+            &state.namespace,
+            &battlegroup_resource(),
+        );
+        api.patch(
+            &battle_group,
+            &PatchParams::default(),
+            &Patch::Merge(database_physical_backup_patch(true)),
+        )
+        .await
+        .with_context(|| format!("failed to enable physical backups for {battle_group}"))?;
+    }
+    Ok(list_database_maintenance(state).await?)
 }
 
 fn pod_summary(pod: Pod) -> PodSummary {
@@ -327,30 +377,49 @@ async fn default_battlegroup_name(state: &AppState) -> Result<String, ApiError> 
     }
 }
 
-async fn database_backup_capability(state: &AppState) -> Result<(bool, String), ApiError> {
+async fn database_backup_capability(
+    state: &AppState,
+) -> Result<DatabaseBackupCapability, ApiError> {
     let battlegroups = list_battlegroups(state).await?;
     match battlegroups.as_slice() {
         [battlegroup] => {
             let object = get_battlegroup_object(state, &battlegroup.name).await?;
             let enabled = database_physical_backups_enabled(&object.data);
+            let storage_configured = database_backup_storage_configured(&object.data);
             if enabled {
-                Ok((
-                    true,
-                    "Physical database backups are enabled for this battlegroup.".to_string(),
-                ))
+                Ok(DatabaseBackupCapability {
+                    physical_enabled: true,
+                    physical_message: "Physical database backups are enabled for this battlegroup."
+                        .to_string(),
+                    storage_configured,
+                    storage_message: database_backup_storage_message(storage_configured),
+                })
             } else {
-                Ok((
-                    false,
-                    "Physical database backups are disabled for this battlegroup.".to_string(),
-                ))
+                Ok(DatabaseBackupCapability {
+                    physical_enabled: false,
+                    physical_message:
+                        "Physical database backups are disabled for this battlegroup.".to_string(),
+                    storage_configured,
+                    storage_message: database_backup_storage_message(storage_configured),
+                })
             }
         }
-        [] => Ok((false, "No battlegroup is available.".to_string())),
-        _ => Ok((
-            false,
-            "Multiple battlegroups are available; select a battlegroup before creating backups."
-                .to_string(),
-        )),
+        [] => Ok(DatabaseBackupCapability {
+            physical_enabled: false,
+            physical_message: "No battlegroup is available.".to_string(),
+            storage_configured: false,
+            storage_message: "No battlegroup is available.".to_string(),
+        }),
+        _ => Ok(DatabaseBackupCapability {
+            physical_enabled: false,
+            physical_message:
+                "Multiple battlegroups are available; select a battlegroup before creating backups."
+                    .to_string(),
+            storage_configured: false,
+            storage_message:
+                "Multiple battlegroups are available; select a battlegroup before creating backups."
+                    .to_string(),
+        }),
     }
 }
 
@@ -359,12 +428,16 @@ async fn ensure_database_backups_enabled(
     battle_group: &str,
 ) -> Result<(), ApiError> {
     let object = get_battlegroup_object(state, battle_group).await?;
-    if database_physical_backups_enabled(&object.data) {
-        Ok(())
-    } else {
+    if !database_physical_backups_enabled(&object.data) {
         Err(ApiError::bad_request(
             "Physical database backups are disabled for this battlegroup",
         ))
+    } else if !database_backup_storage_configured(&object.data) {
+        Err(ApiError::bad_request(
+            "Physical backup storage is not configured for this battlegroup",
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -1017,6 +1090,39 @@ fn database_physical_backups_enabled(data: &Value) -> bool {
         .unwrap_or(false)
 }
 
+fn database_backup_storage_configured(data: &Value) -> bool {
+    data["spec"]["database"]["template"]["spec"]["deployment"]["spec"]["utilityRuntimeConfig"]
+        ["useArtifactBridge"]
+        .as_bool()
+        .unwrap_or(false)
+}
+
+fn database_backup_storage_message(configured: bool) -> String {
+    if configured {
+        "Physical backup storage is configured.".to_string()
+    } else {
+        "Physical backup storage is not configured. Manual backups need the vendor artifact storage bridge or equivalent S3 backup configuration.".to_string()
+    }
+}
+
+fn database_physical_backup_patch(enabled: bool) -> Value {
+    json!({
+        "spec": {
+            "database": {
+                "template": {
+                    "spec": {
+                        "deployment": {
+                            "spec": {
+                                "enablePhysicalBackups": enabled
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 fn maintenance_sort_key(item: &DatabaseMaintenanceItem) -> String {
     item.finish_time
         .as_deref()
@@ -1245,6 +1351,56 @@ mod tests {
 
         assert!(!database_physical_backups_enabled(&disabled));
         assert!(database_physical_backups_enabled(&enabled));
+    }
+
+    #[test]
+    fn detects_database_backup_storage_capability() {
+        let missing = json!({
+            "spec": {
+                "database": {
+                    "template": {
+                        "spec": {
+                            "deployment": {
+                                "spec": {
+                                    "utilityRuntimeConfig": {
+                                        "useArtifactBridge": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let configured = json!({
+            "spec": {
+                "database": {
+                    "template": {
+                        "spec": {
+                            "deployment": {
+                                "spec": {
+                                    "utilityRuntimeConfig": {
+                                        "useArtifactBridge": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        assert!(!database_backup_storage_configured(&missing));
+        assert!(database_backup_storage_configured(&configured));
+    }
+
+    #[test]
+    fn builds_physical_backup_enable_patch() {
+        assert_eq!(
+            database_physical_backup_patch(true)["spec"]["database"]["template"]["spec"]
+                ["deployment"]["spec"]["enablePhysicalBackups"],
+            json!(true)
+        );
     }
 
     #[test]

@@ -513,8 +513,10 @@
   }
 
   async function createDatabaseBackup() {
-    if (databaseMaintenance && !databaseMaintenance.physicalBackupsEnabled) {
-      databaseNotice = databaseMaintenance.physicalBackupsMessage;
+    if (databaseMaintenance && !databaseMaintenance.backupsReady) {
+      databaseNotice = databaseMaintenance.physicalBackupsEnabled
+        ? databaseMaintenance.backupStorageMessage
+        : databaseMaintenance.physicalBackupsMessage;
       return;
     }
     const label = battlegroup?.title || battlegroup?.name || "this server";
@@ -530,6 +532,34 @@
       });
       databaseNotice = `Backup requested: ${created.name}`;
       await loadDatabaseMaintenance();
+    } catch (err) {
+      error = message(err);
+    } finally {
+      databaseActionBusy = false;
+    }
+  }
+
+  async function enablePhysicalBackups() {
+    const ok = window.confirm(
+      "Enable physical database backups for this battlegroup? Kubernetes will reconcile the database deployment before manual backups can run.",
+    );
+    if (!ok) return;
+    databaseActionBusy = true;
+    databaseNotice = "";
+    error = "";
+    try {
+      databaseMaintenance = await api<DatabaseMaintenanceResponse>(
+        "/api/database-maintenance/physical-backups/enable",
+        {
+          method: "POST",
+          body: JSON.stringify({ battleGroup: battlegroup?.name }),
+        },
+      );
+      databaseNotice = databaseMaintenance.physicalBackupsEnabled
+        ? databaseMaintenance.backupsReady
+          ? "Physical backups are enabled. Wait for database reconciliation, then create a manual backup."
+          : databaseMaintenance.backupStorageMessage
+        : databaseMaintenance.physicalBackupsMessage;
     } catch (err) {
       error = message(err);
     } finally {
@@ -1251,8 +1281,13 @@
             </div>
             <div class="actions">
               <input bind:value={databaseFilter} placeholder="Filter database activity" />
+              {#if databaseMaintenance && !databaseMaintenance.physicalBackupsEnabled}
+                <button disabled={databaseActionBusy || !battlegroup} on:click={enablePhysicalBackups}>
+                  {databaseActionBusy ? "Enabling..." : "Enable backups"}
+                </button>
+              {/if}
               <button
-                disabled={databaseActionBusy || !battlegroup || (databaseMaintenance && !databaseMaintenance.physicalBackupsEnabled)}
+                disabled={databaseActionBusy || !battlegroup || !databaseMaintenance || !databaseMaintenance.backupsReady}
                 on:click={createDatabaseBackup}
               >
                 {databaseActionBusy ? "Requesting..." : "Create backup"}
@@ -1264,6 +1299,9 @@
           </div>
           {#if databaseMaintenance && !databaseMaintenance.physicalBackupsEnabled}
             <p class="warn">{databaseMaintenance.physicalBackupsMessage}</p>
+          {/if}
+          {#if databaseMaintenance && databaseMaintenance.physicalBackupsEnabled && !databaseMaintenance.backupStorageConfigured}
+            <p class="warn">{databaseMaintenance.backupStorageMessage}</p>
           {/if}
           {#if databaseNotice}<p class="notice">{databaseNotice}</p>{/if}
           {#if databaseMaintenance}

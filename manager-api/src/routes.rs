@@ -90,6 +90,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/database-maintenance/backups",
             post(create_database_backup_route),
         )
+        .route(
+            "/api/database-maintenance/physical-backups/enable",
+            post(enable_database_backups_route),
+        )
         .route("/api/logs", get(logs))
         .route("/api/logs/export", get(logs_export))
         .route("/api/logs/stream", get(logs_stream))
@@ -616,6 +620,21 @@ async fn create_database_backup_route(
     audit_action("database.backup.create", request.battle_group.as_deref());
     Ok(Json(
         create_database_backup(&state, request.battle_group, request.originator).await?,
+    ))
+}
+
+async fn enable_database_backups_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<EnableDatabaseBackupsRequest>,
+) -> ApiResponse<DatabaseMaintenanceResponse> {
+    authorize(&state, &headers, None)?;
+    audit_action(
+        "database.physical_backups.enable",
+        request.battle_group.as_deref(),
+    );
+    Ok(Json(
+        enable_database_physical_backups(&state, request.battle_group).await?,
     ))
 }
 

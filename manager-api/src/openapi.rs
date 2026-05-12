@@ -200,6 +200,12 @@ pub fn document() -> Value {
                     "responses": { "200": { "description": "Created DatabaseBackup resource" }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
                 }
             },
+            "/api/database-maintenance/physical-backups/enable": {
+                "post": {
+                    "summary": "Enable physical database backups on the battlegroup",
+                    "responses": { "200": { "description": "Updated database maintenance summary" }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+                }
+            },
             "/api/logs": {
                 "get": {
                     "summary": "Read pod logs",

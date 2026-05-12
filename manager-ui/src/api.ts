@@ -111,6 +111,9 @@ export type DatabaseMaintenanceResponse = {
   namespace: string;
   physicalBackupsEnabled: boolean;
   physicalBackupsMessage: string;
+  backupStorageConfigured: boolean;
+  backupStorageMessage: string;
+  backupsReady: boolean;
   backups: DatabaseMaintenanceItem[];
   schedules: DatabaseMaintenanceItem[];
   restores: DatabaseMaintenanceItem[];
