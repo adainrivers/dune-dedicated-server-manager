@@ -224,6 +224,30 @@ pub fn document() -> Value {
                     "responses": { "200": { "description": "Player directory rows" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
                 }
             },
+            "/api/database/players/{accountId}/tags": {
+                "post": {
+                    "summary": "Add a controlled player tag",
+                    "parameters": [
+                        { "name": "accountId", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 } }
+                    ],
+                    "requestBody": {
+                        "required": true,
+                        "content": { "application/json": { "schema": { "type": "object", "required": ["tag"], "properties": { "tag": { "type": "string", "maxLength": 64 } } } } }
+                    },
+                    "responses": { "200": { "description": "Updated player tags" }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/Error" } }
+                },
+                "delete": {
+                    "summary": "Remove a controlled player tag",
+                    "parameters": [
+                        { "name": "accountId", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 } }
+                    ],
+                    "requestBody": {
+                        "required": true,
+                        "content": { "application/json": { "schema": { "type": "object", "required": ["tag"], "properties": { "tag": { "type": "string", "maxLength": 64 } } } } }
+                    },
+                    "responses": { "200": { "description": "Updated player tags" }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/Error" } }
+                }
+            },
             "/api/database/player-statistics": {
                 "get": {
                     "summary": "Read controlled player and guild statistics from the game database",

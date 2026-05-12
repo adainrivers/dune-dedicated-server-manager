@@ -163,6 +163,14 @@ export type DatabasePlayersResponse = {
   rows: DatabasePlayerSummary[];
 };
 
+export type DatabasePlayerTagsUpdateResponse = {
+  namespace: string;
+  result: {
+    accountId: number;
+    tags: string[];
+  };
+};
+
 export type DatabaseNamedCount = {
   name: string;
   count: number;

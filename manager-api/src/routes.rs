@@ -96,6 +96,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/database/players", get(database_players))
         .route(
+            "/api/database/players/:account_id/tags",
+            post(add_database_player_tag_route).delete(remove_database_player_tag_route),
+        )
+        .route(
             "/api/database/player-statistics",
             get(database_player_statistics_route),
         )
@@ -656,6 +660,34 @@ async fn database_players(
     Ok(Json(DatabasePlayersResponse {
         namespace: state.namespace.clone(),
         rows: list_database_players(&state).await?,
+    }))
+}
+
+async fn add_database_player_tag_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(account_id): Path<i64>,
+    Json(request): Json<DatabasePlayerTagRequest>,
+) -> ApiResponse<DatabasePlayerTagsUpdateResponse> {
+    authorize(&state, &headers, None)?;
+    audit_action("database.player_tags.add", Some(&account_id.to_string()));
+    Ok(Json(DatabasePlayerTagsUpdateResponse {
+        namespace: state.namespace.clone(),
+        result: add_database_player_tag(&state, account_id, request).await?,
+    }))
+}
+
+async fn remove_database_player_tag_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(account_id): Path<i64>,
+    Json(request): Json<DatabasePlayerTagRequest>,
+) -> ApiResponse<DatabasePlayerTagsUpdateResponse> {
+    authorize(&state, &headers, None)?;
+    audit_action("database.player_tags.remove", Some(&account_id.to_string()));
+    Ok(Json(DatabasePlayerTagsUpdateResponse {
+        namespace: state.namespace.clone(),
+        result: remove_database_player_tag(&state, account_id, request).await?,
     }))
 }
 

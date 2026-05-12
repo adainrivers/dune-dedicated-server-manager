@@ -9,8 +9,8 @@ use tokio::io::AsyncReadExt;
 use crate::{
     errors::ApiError,
     models::{
-        DatabasePlayerStatistics, DatabasePlayerSummary, DatabaseWorldPartition,
-        DatabaseWorldPartitionUpdateRequest,
+        DatabasePlayerStatistics, DatabasePlayerSummary, DatabasePlayerTagRequest,
+        DatabasePlayerTagsUpdate, DatabaseWorldPartition, DatabaseWorldPartitionUpdateRequest,
     },
     state::AppState,
 };
@@ -40,6 +40,28 @@ pub async fn database_player_statistics(state: &AppState) -> Result<DatabasePlay
 
     serde_json::from_str(stdout.trim())
         .with_context(|| "failed to parse database player statistics output".to_string())
+}
+
+pub async fn add_database_player_tag(
+    state: &AppState,
+    account_id: i64,
+    request: DatabasePlayerTagRequest,
+) -> Result<DatabasePlayerTagsUpdate, ApiError> {
+    let tag = validate_player_tag(request.tag)?;
+    let query = player_tag_update_query("insert", account_id, &tag)?;
+    let stdout = exec_database_psql_json(state, &query).await?;
+    parse_player_tags_update(&stdout)
+}
+
+pub async fn remove_database_player_tag(
+    state: &AppState,
+    account_id: i64,
+    request: DatabasePlayerTagRequest,
+) -> Result<DatabasePlayerTagsUpdate, ApiError> {
+    let tag = validate_player_tag(request.tag)?;
+    let query = player_tag_update_query("delete", account_id, &tag)?;
+    let stdout = exec_database_psql_json(state, &query).await?;
+    parse_player_tags_update(&stdout)
 }
 
 pub async fn update_world_partition(
@@ -149,6 +171,53 @@ fn validate_partition_label(value: Option<String>) -> Result<Option<String>, Api
     Ok(Some(value))
 }
 
+fn validate_player_tag(value: String) -> Result<String, ApiError> {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(ApiError::bad_request("player tag is required"));
+    }
+    if value.chars().count() > 64 {
+        return Err(ApiError::bad_request(
+            "player tag must be 64 characters or less",
+        ));
+    }
+    if value.chars().any(|character| character.is_control()) {
+        return Err(ApiError::bad_request(
+            "player tag cannot contain control characters",
+        ));
+    }
+    Ok(value)
+}
+
+fn player_tag_update_query(action: &str, account_id: i64, tag: &str) -> Result<String, ApiError> {
+    if account_id <= 0 {
+        return Err(ApiError::bad_request("account id must be positive"));
+    }
+    let tag_sql = format!("convert_from(decode('{}', 'hex'), 'UTF8')", hex_encode(tag));
+    let mutation = match action {
+        "insert" => format!(
+            "insert into dune.player_tags(account_id, tag) select {account_id}, {tag_sql} where exists (select 1 from dune.encrypted_accounts where id = {account_id}) on conflict do nothing returning account_id"
+        ),
+        "delete" => {
+            format!("delete from dune.player_tags where account_id = {account_id} and tag = {tag_sql} returning account_id")
+        }
+        _ => return Err(ApiError::bad_request("invalid player tag action")),
+    };
+    Ok(format!(
+        "with account_check as (select exists(select 1 from dune.encrypted_accounts where id = {account_id}) as account_exists), mutation as ({mutation}), tags as (select coalesce(json_agg(tag order by tag), '[]'::json) as tags from dune.player_tags where account_id = {account_id}) select json_build_object('account_id', {account_id}, 'account_exists', (select account_exists from account_check), 'tags', (select tags from tags))"
+    ))
+}
+
+fn parse_player_tags_update(stdout: &str) -> Result<DatabasePlayerTagsUpdate, ApiError> {
+    let value: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|_| ApiError::bad_gateway("failed to parse player tags update"))?;
+    if !value["account_exists"].as_bool().unwrap_or(false) {
+        return Err(ApiError::not_found("player account was not found"));
+    }
+    serde_json::from_value(value)
+        .map_err(|_| ApiError::bad_gateway("failed to parse updated player tags"))
+}
+
 fn hex_encode(value: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let bytes = value.as_bytes();
@@ -197,6 +266,36 @@ mod tests {
         assert_eq!(statistics.total_players, 2);
         assert_eq!(statistics.online_statuses[0].name, "Online");
         assert_eq!(statistics.recent_players[0].account_id, 42);
+    }
+
+    #[test]
+    fn validates_player_tags() {
+        assert_eq!(
+            validate_player_tag("  community helper  ".to_string()).unwrap(),
+            "community helper"
+        );
+        assert!(validate_player_tag("".to_string()).is_err());
+        assert!(validate_player_tag("x".repeat(65)).is_err());
+        assert!(validate_player_tag("bad\ntag".to_string()).is_err());
+    }
+
+    #[test]
+    fn parses_player_tags_update() {
+        let result = parse_player_tags_update(
+            r#"{"account_id":42,"account_exists":true,"tags":["admin","builder"]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(result.account_id, 42);
+        assert_eq!(result.tags, vec!["admin", "builder"]);
+    }
+
+    #[test]
+    fn rejects_player_tags_update_for_missing_accounts() {
+        let result =
+            parse_player_tags_update(r#"{"account_id":42,"account_exists":false,"tags":[]}"#);
+
+        assert!(result.is_err());
     }
 
     #[test]

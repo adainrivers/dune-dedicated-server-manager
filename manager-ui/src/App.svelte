@@ -9,6 +9,7 @@
     type DatabaseMaintenanceItem,
     type DatabaseMaintenanceResponse,
     type DatabasePlayerStatisticsResponse,
+    type DatabasePlayerTagsUpdateResponse,
     type DatabasePlayerSummary,
     type DatabasePlayersResponse,
     type DatabaseWorldPartition,
@@ -144,6 +145,8 @@
   let playerFilter = "";
   let databasePlayers: DatabasePlayersResponse | null = null;
   let databasePlayersBusy = false;
+  let playerTagDrafts: Record<number, string> = {};
+  let playerTagBusy: Record<number, boolean> = {};
   let playerStatistics: DatabasePlayerStatisticsResponse | null = null;
   let playerStatisticsBusy = false;
   let workloadFilter = "";
@@ -576,6 +579,48 @@
       if (showError) error = message(err);
     } finally {
       databasePlayersBusy = false;
+    }
+  }
+
+  function updatePlayerTagDraft(accountId: number, value: string) {
+    playerTagDrafts = { ...playerTagDrafts, [accountId]: value };
+  }
+
+  async function savePlayerTag(player: DatabasePlayerSummary) {
+    const tag = (playerTagDrafts[player.accountId] || "").trim();
+    if (!tag) {
+      error = "Enter a tag before adding it.";
+      return;
+    }
+    await updatePlayerTags(player.accountId, tag, "POST");
+    playerTagDrafts = { ...playerTagDrafts, [player.accountId]: "" };
+  }
+
+  async function removePlayerTag(player: DatabasePlayerSummary, tag: string) {
+    await updatePlayerTags(player.accountId, tag, "DELETE");
+  }
+
+  async function updatePlayerTags(accountId: number, tag: string, method: "POST" | "DELETE") {
+    playerTagBusy = { ...playerTagBusy, [accountId]: true };
+    error = "";
+    try {
+      const result = await api<DatabasePlayerTagsUpdateResponse>(`/api/database/players/${accountId}/tags`, {
+        method,
+        body: JSON.stringify({ tag }),
+      });
+      if (databasePlayers) {
+        databasePlayers = {
+          ...databasePlayers,
+          rows: databasePlayers.rows.map((player) =>
+            player.accountId === result.result.accountId ? { ...player, tags: result.result.tags } : player,
+          ),
+        };
+      }
+      void loadPlayerStatistics(false);
+    } catch (err) {
+      error = message(err);
+    } finally {
+      playerTagBusy = { ...playerTagBusy, [accountId]: false };
     }
   }
 
@@ -2445,11 +2490,38 @@
                     <span>Home dimension</span><b>{player.homeDimensionIndex ?? "Unknown"}</b>
                     <span>Last login</span><b>{formatBackupTime(player.lastLoginTime)}</b>
                   </div>
-                  {#if player.tags.length}
+                  <div class="player-tag-editor">
                     <div class="tag-row">
-                      {#each player.tags as tag}<span>{tag}</span>{/each}
+                      {#each player.tags as tag}
+                        <span>
+                          {tag}
+                          <button
+                            class="tag-remove"
+                            disabled={playerTagBusy[player.accountId]}
+                            on:click={() => removePlayerTag(player, tag)}
+                          >
+                            Remove
+                          </button>
+                        </span>
+                      {/each}
+                      {#if !player.tags.length}<em>No tags</em>{/if}
                     </div>
-                  {/if}
+                    <div class="tag-add">
+                      <input
+                        value={playerTagDrafts[player.accountId] || ""}
+                        maxlength="64"
+                        placeholder="Add operator tag"
+                        on:input={(event) => updatePlayerTagDraft(player.accountId, event.currentTarget.value)}
+                      />
+                      <button
+                        class="inline"
+                        disabled={playerTagBusy[player.accountId]}
+                        on:click={() => savePlayerTag(player)}
+                      >
+                        {playerTagBusy[player.accountId] ? "Saving..." : "Add tag"}
+                      </button>
+                    </div>
+                  </div>
                 </article>
               {/each}
             </div>
