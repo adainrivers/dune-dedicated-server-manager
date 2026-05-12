@@ -84,11 +84,3 @@ Build the VM-side Manager API for Linux from WSL:
 ```powershell
 wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/Dune/Development/DedicatedServerManager/manager-api && cargo build --target x86_64-unknown-linux-musl --release"
 ```
-
-For release builds with auto-update, configure these GitHub Actions values:
-
-- Secret: TAURI_SIGNING_PRIVATE_KEY
-- Secret: TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-- Variable: TAURI_UPDATER_PUBLIC_KEY
-
-Push a version tag such as `v0.1.0` to build and publish a release.

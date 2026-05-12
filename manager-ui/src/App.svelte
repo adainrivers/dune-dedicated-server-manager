@@ -5,6 +5,7 @@
   import {
     ApiError,
     api,
+    type BattlegroupSummary,
     type DatabaseMaintenanceItem,
     type DatabaseMaintenanceResponse,
     type DirectorCapabilities,
@@ -47,6 +48,25 @@
     | "players"
     | "logs"
     | "settings";
+
+  type NavItem = {
+    page: Page;
+    label: string;
+  };
+
+  const navItems: NavItem[] = [
+    { page: "dashboard", label: "Command Center" },
+    { page: "players", label: "Players" },
+    { page: "layout", label: "World Layout" },
+    { page: "config", label: "Game Settings" },
+    { page: "director", label: "Director Rules" },
+    { page: "database", label: "Backups" },
+    { page: "battlegroup", label: "Server Control" },
+    { page: "workloads", label: "Workloads" },
+    { page: "storage", label: "Storage" },
+    { page: "logs", label: "Logs" },
+    { page: "settings", label: "Manager" },
+  ];
 
   let session: Session | null = null;
   let token = "";
@@ -135,6 +155,12 @@
         ? "pve"
         : "off"
     : "off";
+  $: notReadyPods = pods.filter((pod) => !pod.ready);
+  $: runningPods = pods.filter((pod) => pod.ready).length;
+  $: onlineMaps = (overview?.maps ?? []).filter((map) => map.servers.some((server) => server.status === "Running")).length;
+  $: dashboardMaps = selectDashboardMaps(overview);
+  $: serverHealth = deriveServerHealth(overview, battlegroup, notReadyPods);
+  $: nextActions = deriveNextActions(battlegroup, overview, databaseMaintenance, lifecycleBusy);
   $: if (selectedContainer && selectedPodSummary && !selectedPodSummary.containers.includes(selectedContainer)) {
     selectedContainer = "";
   }
@@ -223,6 +249,7 @@
         layout = await api<WorldLayout>(`/api/battlegroups/${battlegroup.namespace}/${battlegroup.name}/layout`);
       }
       if (!settingsCatalog) settingsCatalog = await api<UserSettingsCatalog>("/api/config/user-settings");
+      if (!databaseMaintenance) void loadDatabaseMaintenance(false);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         session = null;
@@ -500,13 +527,13 @@
     }
   }
 
-  async function loadDatabaseMaintenance() {
+  async function loadDatabaseMaintenance(showError = true) {
     databaseBusy = true;
-    error = "";
+    if (showError) error = "";
     try {
       databaseMaintenance = await api<DatabaseMaintenanceResponse>("/api/database-maintenance");
     } catch (err) {
-      error = message(err);
+      if (showError) error = message(err);
     } finally {
       databaseBusy = false;
     }
@@ -1082,6 +1109,76 @@
   function selectedDirectorCapability() {
     return directorCapabilities?.apiPaths.find((item) => capabilityKey(item) === directorApiSelection) ?? null;
   }
+
+  function deriveServerHealth(
+    overviewValue: Overview | null,
+    battlegroupValue: BattlegroupSummary | null,
+    notReady: PodSummary[],
+  ) {
+    if (!overviewValue) {
+      return { label: "Loading", tone: "neutral", summary: "Waiting for the manager API." };
+    }
+    if (!battlegroupValue) {
+      return { label: "No server", tone: "danger", summary: "No battlegroup is available in this namespace." };
+    }
+    if (battlegroupValue.stop) {
+      return { label: "Stopped", tone: "danger", summary: "The battlegroup is intentionally stopped." };
+    }
+    if (notReady.length > 0) {
+      return {
+        label: "Needs attention",
+        tone: "warn",
+        summary: `${notReady.length} workload${notReady.length === 1 ? " is" : "s are"} not ready.`,
+      };
+    }
+    if (!overviewValue.directorAvailable) {
+      return { label: "Director offline", tone: "warn", summary: "Game services may be up, but Director telemetry is unavailable." };
+    }
+    return { label: "Healthy", tone: "good", summary: "Game services, Director, and workloads look ready." };
+  }
+
+  function deriveNextActions(
+    battlegroupValue: BattlegroupSummary | null,
+    overviewValue: Overview | null,
+    databaseValue: DatabaseMaintenanceResponse | null,
+    busyAction: string,
+  ) {
+    const actions: Array<{ label: string; hint: string; page?: Page; action?: "start" | "stop" | "restart"; danger?: boolean; disabled?: boolean }> = [];
+    if (!battlegroupValue) {
+      actions.push({ label: "Refresh", hint: "Look for a battlegroup", disabled: false });
+      return actions;
+    }
+    if (battlegroupValue.stop) {
+      actions.push({ label: "Start server", hint: "Bring the world online", action: "start", disabled: !!busyAction });
+    } else {
+      actions.push({ label: "Manage players", hint: `${overviewValue?.players?.active ?? 0} active now`, page: "players" });
+      actions.push({ label: "Edit game settings", hint: "INI-backed runtime settings", page: "config" });
+      actions.push({ label: "Restart server", hint: "Apply pending runtime changes", action: "restart", disabled: !!busyAction });
+      actions.push({ label: "Stop server", hint: "Disconnects online players", action: "stop", danger: true, disabled: !!busyAction });
+    }
+    actions.push({
+      label: databaseValue?.backupsReady ? "Create backup" : "Check backups",
+      hint: databaseValue
+        ? databaseValue.backupsReady
+          ? "Manual database backup is available"
+          : "Backup storage needs attention"
+        : "Load backup readiness",
+      page: "database",
+    });
+    return actions.slice(0, 5);
+  }
+
+  function mapHealthLabel(map: { servers: Array<{ status: string }> }) {
+    if (!map.servers.length) return "No servers";
+    const running = map.servers.filter((server) => server.status === "Running").length;
+    return running === map.servers.length ? "Running" : `${running}/${map.servers.length} running`;
+  }
+
+  function selectDashboardMaps(overviewValue: Overview | null) {
+    const maps = overviewValue?.maps ?? [];
+    const relevant = maps.filter((map) => map.players > 0 || map.servers.some((server) => server.status === "Running"));
+    return (relevant.length ? relevant : maps).slice(0, 8);
+  }
 </script>
 
 {#if loading}
@@ -1110,8 +1207,10 @@
         <strong>Dune Manager</strong>
         <span>{session.namespace}</span>
       </div>
-      {#each ["dashboard", "battlegroup", "workloads", "storage", "database", "layout", "config", "director", "players", "logs", "settings"] as item}
-        <button class:active={page === item} on:click={() => (page = item as Page)}>{item}</button>
+      {#each navItems as item}
+        <button class:active={page === item.page} on:click={() => (page = item.page)}>
+          {item.label}
+        </button>
       {/each}
       <button class="ghost" on:click={logout}>Sign out</button>
     </aside>
@@ -1135,29 +1234,105 @@
       {#if error}<p class="error">{error}</p>{/if}
 
       {#if page === "dashboard"}
-        <div class="grid">
-          <Card label="Battlegroup" value={battlegroup?.phase || "Unknown"} />
-          <Card label="Pods" value={`${overview?.status.pods ?? 0}`} />
-          <Card label="Players" value={`${overview?.players?.active ?? 0}`} />
-          <Card label="Director" value={overview?.directorAvailable ? "Reachable" : "Unavailable"} />
-          <Card label="Telemetry" value={telemetryConnected ? "Live" : "Offline"} />
-        </div>
-        <section class="panel">
-          <h2>Live Stream</h2>
-          <div class="rows compact">
-            <div class="row"><span>Status</span><b class:good={telemetryConnected}>{telemetryConnected ? "Connected" : "Disconnected"}</b></div>
-            <div class="row"><span>Snapshots</span><b>{telemetrySnapshots}</b></div>
-            <div class="row"><span>Last update</span><b>{telemetryLastAt || "Waiting"}</b></div>
+        <section class="dashboard-hero">
+          <div class="hero-copy">
+            <p class="eyebrow">Server health</p>
+            <h2>{serverHealth.label}</h2>
+            <p>{serverHealth.summary}</p>
           </div>
-          {#if telemetryError}<p class="warn">{telemetryError}</p>{/if}
+          <div class:good={serverHealth.tone === "good"} class:warning={serverHealth.tone === "warn"} class:danger-state={serverHealth.tone === "danger"} class="health-badge">
+            <span>BattleGroup {battlegroup?.phase || "Unknown"}</span>
+            <strong>{battlegroup?.stop ? "Offline" : "Online"}</strong>
+          </div>
         </section>
-        <section class="panel">
-          <h2>Workloads</h2>
-          <div class="rows">
-            {#each pods as pod}
-              <div class="row"><span>{pod.name}</span><b class:good={pod.ready}>{pod.ready ? "Ready" : pod.phase}</b></div>
-            {/each}
-          </div>
+        <div class="grid dashboard-metrics">
+          <Card label="Players online" value={`${overview?.players?.online ?? 0}`} />
+          <Card label="Queued" value={`${overview?.players?.queued ?? 0}`} />
+          <Card label="Maps online" value={`${onlineMaps}/${overview?.maps.length ?? 0}`} />
+          <Card label="Workloads ready" value={`${runningPods}/${pods.length}`} />
+        </div>
+        <section class="dashboard-grid">
+          <section class="panel action-panel">
+            <div class="split-heading">
+              <div>
+                <h2>Next Actions</h2>
+                <p class="muted">Common server-operator tasks for the current state.</p>
+              </div>
+              <b class:good={telemetryConnected}>{telemetryConnected ? "Live" : "Polling"}</b>
+            </div>
+            <div class="quick-actions">
+              {#each nextActions as action}
+                <button
+                  class:danger={action.danger}
+                  disabled={action.disabled}
+                  on:click={() => action.action ? lifecycle(action.action) : action.page ? (page = action.page) : refresh()}
+                >
+                  <strong>{action.label}</strong>
+                  <span>{action.hint}</span>
+                </button>
+              {/each}
+            </div>
+            {#if telemetryError}<p class="warn">{telemetryError}</p>{/if}
+          </section>
+          <section class="panel player-panel">
+            <div class="split-heading">
+              <div>
+                <h2>Players</h2>
+                <p class="muted">Current Director player buckets.</p>
+              </div>
+              <button class="inline" on:click={() => (page = "players")}>Open</button>
+            </div>
+            <div class="player-summary">
+              <div><span>Active</span><b>{overview?.players?.active ?? 0}</b></div>
+              <div><span>Online</span><b>{overview?.players?.online ?? 0}</b></div>
+              <div><span>Traveling</span><b>{overview?.players?.inTransit ?? 0}</b></div>
+              <div><span>Queued</span><b>{overview?.players?.queued ?? 0}</b></div>
+            </div>
+          </section>
+        </section>
+        <section class="dashboard-grid lower">
+          <section class="panel">
+            <div class="split-heading">
+              <div>
+                <h2>Map Population</h2>
+                <p class="muted">Player load and shard status from Director.</p>
+              </div>
+              <button class="inline" on:click={() => (page = "director")}>Rules</button>
+            </div>
+            <div class="map-list">
+              {#each dashboardMaps as map}
+                <article>
+                  <div>
+                    <strong>{map.name}</strong>
+                    <span>{map.kind} · {mapHealthLabel(map)}</span>
+                  </div>
+                  <b>{map.players} players</b>
+                </article>
+              {/each}
+            </div>
+            {#if (overview?.maps.length ?? 0) > dashboardMaps.length}
+              <p class="muted map-note">Showing {dashboardMaps.length} of {overview?.maps.length ?? 0} maps. Open Director Rules for the full list.</p>
+            {/if}
+          </section>
+          <section class="panel">
+            <div class="split-heading">
+              <div>
+                <h2>Backups</h2>
+                <p class="muted">Database protection state for this battlegroup.</p>
+              </div>
+              <button class="inline" on:click={() => (page = "database")}>Open</button>
+            </div>
+            {#if databaseMaintenance}
+              <div class="rows compact">
+                <div class="row"><span>Physical backups</span><b class:good={databaseMaintenance.physicalBackupsEnabled}>{databaseMaintenance.physicalBackupsEnabled ? "Enabled" : "Disabled"}</b></div>
+                <div class="row"><span>Backup storage</span><b class:good={databaseMaintenance.backupStorageConfigured}>{databaseMaintenance.backupStorageConfigured ? "Configured" : "Missing"}</b></div>
+                <div class="row"><span>Backup runs</span><b>{databaseMaintenance.backups.length}</b></div>
+              </div>
+              {#if !databaseMaintenance.backupsReady}<p class="warn">{databaseMaintenance.physicalBackupsEnabled ? databaseMaintenance.backupStorageMessage : databaseMaintenance.physicalBackupsMessage}</p>{/if}
+            {:else}
+              <p class="muted">Backup readiness is loading.</p>
+            {/if}
+          </section>
         </section>
       {:else if page === "workloads"}
         <section class="panel form">
