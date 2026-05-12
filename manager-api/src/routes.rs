@@ -772,19 +772,32 @@ async fn director_players(
 ) -> ApiResponse<DirectorPlayerLists> {
     authorize(&state, &headers, None)?;
     let base_url = ensure_director_available(&state).await?;
-    let all = director_get_json_with_base(&state, &base_url, "/v0/players").await?;
-    let online = director_get_json_with_base(&state, &base_url, "/v0/players/online").await?;
 
-    let (in_transit, grace_period, completion, queued) = if query.full.unwrap_or(false) {
-        (
-            director_get_json_with_base(&state, &base_url, "/v0/players/intransit").await?,
-            director_get_json_with_base(&state, &base_url, "/v0/players/graceperiod").await?,
-            director_get_json_with_base(&state, &base_url, "/v0/players/completion").await?,
-            director_get_json_with_base(&state, &base_url, "/v0/players/queued").await?,
-        )
+    let (all, online, in_transit, grace_period, completion, queued) = if query.full.unwrap_or(false)
+    {
+        let (all, online, in_transit, grace_period, completion, queued) = tokio::try_join!(
+            director_get_json_with_base(&state, &base_url, "/v0/players"),
+            director_get_json_with_base(&state, &base_url, "/v0/players/online"),
+            director_get_json_with_base(&state, &base_url, "/v0/players/intransit"),
+            director_get_json_with_base(&state, &base_url, "/v0/players/graceperiod"),
+            director_get_json_with_base(&state, &base_url, "/v0/players/completion"),
+            director_get_json_with_base(&state, &base_url, "/v0/players/queued"),
+        )?;
+        (all, online, in_transit, grace_period, completion, queued)
     } else {
+        let (all, online) = tokio::try_join!(
+            director_get_json_with_base(&state, &base_url, "/v0/players"),
+            director_get_json_with_base(&state, &base_url, "/v0/players/online"),
+        )?;
         let empty = json!([]);
-        (empty.clone(), empty.clone(), empty.clone(), empty)
+        (
+            all,
+            online,
+            empty.clone(),
+            empty.clone(),
+            empty.clone(),
+            empty,
+        )
     };
     Ok(Json(director_player_lists(
         &all,
