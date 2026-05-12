@@ -218,6 +218,12 @@ pub fn document() -> Value {
                     "responses": { "200": { "description": "Updated world partition row" }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/Error" } }
                 }
             },
+            "/api/database/players": {
+                "get": {
+                    "summary": "List controlled player directory rows from the game database",
+                    "responses": { "200": { "description": "Player directory rows" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+                }
+            },
             "/api/database-maintenance": {
                 "get": {
                     "summary": "List database backup, restore, migration, schedule, and operation resources",

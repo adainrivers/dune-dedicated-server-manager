@@ -141,6 +141,28 @@ export type DatabaseWorldPartitionUpdateResponse = {
   row: DatabaseWorldPartition;
 };
 
+export type DatabasePlayerSummary = {
+  accountId: number;
+  characterName?: string;
+  onlineStatus?: string;
+  lifeState?: string;
+  serverId?: string;
+  playerControllerId?: number;
+  playerStateId?: number;
+  previousServerPartitionId?: number;
+  homeDimensionIndex?: number;
+  lastLoginTime?: string;
+  lastAvatarActivity?: string;
+  guildId?: number;
+  guildName?: string;
+  tags: string[];
+};
+
+export type DatabasePlayersResponse = {
+  namespace: string;
+  rows: DatabasePlayerSummary[];
+};
+
 export type PlayerSummary = {
   active: number;
   online: number;

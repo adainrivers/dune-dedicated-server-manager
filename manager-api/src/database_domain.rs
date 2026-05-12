@@ -8,19 +8,27 @@ use tokio::io::AsyncReadExt;
 
 use crate::{
     errors::ApiError,
-    models::{DatabaseWorldPartition, DatabaseWorldPartitionUpdateRequest},
+    models::{DatabasePlayerSummary, DatabaseWorldPartition, DatabaseWorldPartitionUpdateRequest},
     state::AppState,
 };
 
 const WORLD_PARTITIONS_QUERY: &str = "select coalesce(json_agg(t), '[]'::json) from (select partition_id, server_id, map, partition_definition::text as partition_definition, dimension_index, blocked, label from world_partition order by map, partition_id) t";
 const WORLD_PARTITION_SELECT: &str =
     "partition_id, server_id, map, partition_definition::text as partition_definition, dimension_index, blocked, label";
+const PLAYER_DIRECTORY_QUERY: &str = "select coalesce(json_agg(t), '[]'::json) from (select ps.account_id, ps.character_name, ps.online_status::text as online_status, ps.life_state::text as life_state, ps.server_id, ps.player_controller_id, ps.player_state_id, ps.previous_server_partition_id, ps.home_dimension_index, ps.last_login_time::text as last_login_time, ps.last_avatar_activity::text as last_avatar_activity, g.guild_id, g.guild_name, coalesce(tags.tags, '[]'::json) as tags from dune.player_state ps left join dune.guild_members gm on gm.player_id = ps.player_state_id left join dune.guilds g on g.guild_id = gm.guild_id left join lateral (select json_agg(pt.tag order by pt.tag) as tags from dune.player_tags pt where pt.account_id = ps.account_id) tags on true order by ps.last_login_time desc nulls last, ps.character_name asc nulls last limit 500) t";
 
 pub async fn list_world_partitions(state: &AppState) -> Result<Vec<DatabaseWorldPartition>> {
     let stdout = exec_database_psql_json(state, WORLD_PARTITIONS_QUERY).await?;
 
     serde_json::from_str(stdout.trim())
         .with_context(|| "failed to parse world_partition query output".to_string())
+}
+
+pub async fn list_database_players(state: &AppState) -> Result<Vec<DatabasePlayerSummary>> {
+    let stdout = exec_database_psql_json(state, PLAYER_DIRECTORY_QUERY).await?;
+
+    serde_json::from_str(stdout.trim())
+        .with_context(|| "failed to parse database player directory output".to_string())
 }
 
 pub async fn update_world_partition(
@@ -154,6 +162,18 @@ mod tests {
         assert_eq!(rows[0].partition_id, 8);
         assert_eq!(rows[0].server_id.as_deref(), Some("server-a"));
         assert_eq!(rows[0].map, "DeepDesert_0");
+    }
+
+    #[test]
+    fn parses_database_player_rows() {
+        let json = r#"[{"account_id":42,"character_name":"Siona","online_status":"Online","life_state":"Alive","server_id":"server-a","player_controller_id":10,"player_state_id":11,"previous_server_partition_id":8,"home_dimension_index":0,"last_login_time":"2026-05-12 10:00:00+00","last_avatar_activity":"2026-05-12 10:05:00+00","guild_id":7,"guild_name":"Atreides","tags":["builder","admin"]}]"#;
+
+        let rows: Vec<DatabasePlayerSummary> = serde_json::from_str(json).unwrap();
+
+        assert_eq!(rows[0].account_id, 42);
+        assert_eq!(rows[0].character_name.as_deref(), Some("Siona"));
+        assert_eq!(rows[0].guild_name.as_deref(), Some("Atreides"));
+        assert_eq!(rows[0].tags, vec!["builder", "admin"]);
     }
 
     #[test]

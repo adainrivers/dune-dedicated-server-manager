@@ -8,6 +8,8 @@
     type BattlegroupSummary,
     type DatabaseMaintenanceItem,
     type DatabaseMaintenanceResponse,
+    type DatabasePlayerSummary,
+    type DatabasePlayersResponse,
     type DatabaseWorldPartition,
     type DatabaseWorldPartitionUpdateResponse,
     type DatabaseWorldPartitionsResponse,
@@ -139,6 +141,8 @@
   let playersBusy = false;
   let playersFull = false;
   let playerFilter = "";
+  let databasePlayers: DatabasePlayersResponse | null = null;
+  let databasePlayersBusy = false;
   let workloadFilter = "";
   let events: EventSummary[] = [];
   let eventsBusy = false;
@@ -188,6 +192,7 @@
   $: directorMapFields = jsonPrimitiveFields(directorMapDraft).slice(0, 80);
   $: playerRows = playerActivityRows(playerLists);
   $: visiblePlayerRows = filterPlayerRows(playerRows, playerFilter);
+  $: visibleDatabasePlayers = filterDatabasePlayers(databasePlayers?.rows ?? [], playerFilter);
   $: serverHealth = deriveServerHealth(overview, battlegroup, notReadyPods);
   $: nextActions = deriveNextActions(battlegroup, overview, databaseMaintenance, lifecycleBusy);
   $: if (selectedContainer && selectedPodSummary && !selectedPodSummary.containers.includes(selectedContainer)) {
@@ -255,6 +260,9 @@
     }
     if (nextPage === "players" && !playerLists && !playersBusy) {
       void loadPlayerLists(false);
+    }
+    if (nextPage === "players" && !databasePlayers && !databasePlayersBusy) {
+      void loadDatabasePlayers(false);
     }
   }
 
@@ -549,6 +557,18 @@
       error = message(err);
     } finally {
       playersBusy = false;
+    }
+  }
+
+  async function loadDatabasePlayers(showError = true) {
+    databasePlayersBusy = true;
+    if (showError) error = "";
+    try {
+      databasePlayers = await api<DatabasePlayersResponse>("/api/database/players");
+    } catch (err) {
+      if (showError) error = message(err);
+    } finally {
+      databasePlayersBusy = false;
     }
   }
 
@@ -1028,6 +1048,26 @@
     const text = filter.trim().toLowerCase();
     if (!text) return items;
     return items.filter((item) => [item.id, item.status, ...item.buckets].join(" ").toLowerCase().includes(text));
+  }
+
+  function filterDatabasePlayers(items: DatabasePlayerSummary[], filter: string) {
+    const text = filter.trim().toLowerCase();
+    if (!text) return items;
+    return items.filter((item) =>
+      [
+        item.accountId,
+        item.characterName,
+        item.onlineStatus,
+        item.lifeState,
+        item.serverId,
+        item.previousServerPartitionId,
+        item.guildName,
+        ...(item.tags || []),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(text),
+    );
   }
 
   function servicePorts(service: (typeof services)[number]) {
@@ -2302,6 +2342,55 @@
           <Card label="Queued" value={`${overview?.players?.queued ?? 0}`} />
           <Card label="Travel" value={`${overview?.players?.inTransit ?? 0}`} />
         </div>
+        <section class="panel player-directory-panel">
+          <div class="split-heading">
+            <div>
+              <h2>Player Directory</h2>
+              <p class="muted">Operational player state from the game database: character, guild, partition, status, and recent activity.</p>
+            </div>
+            <div class="actions">
+              <input bind:value={playerFilter} placeholder="Filter players, guilds, status, or partition" />
+              <button disabled={databasePlayersBusy} on:click={() => loadDatabasePlayers()}>
+                {databasePlayersBusy ? "Loading..." : databasePlayers ? "Refresh directory" : "Load directory"}
+              </button>
+            </div>
+          </div>
+          {#if visibleDatabasePlayers.length}
+            <div class="player-directory">
+              {#each visibleDatabasePlayers as player}
+                <article>
+                  <div>
+                    <strong>{player.characterName || `Account ${player.accountId}`}</strong>
+                    <span>{player.guildName || "No guild"} · account {player.accountId}</span>
+                  </div>
+                  <div class="player-directory-state">
+                    <b class:good={player.onlineStatus === "Online"}>{player.onlineStatus || "Unknown"}</b>
+                    <span>{player.lifeState || "No life state"}</span>
+                  </div>
+                  <div class="player-directory-meta">
+                    <span>Server</span><b>{player.serverId || "None"}</b>
+                    <span>Partition</span><b>{player.previousServerPartitionId ?? "Unknown"}</b>
+                    <span>Home dimension</span><b>{player.homeDimensionIndex ?? "Unknown"}</b>
+                    <span>Last login</span><b>{formatBackupTime(player.lastLoginTime)}</b>
+                  </div>
+                  {#if player.tags.length}
+                    <div class="tag-row">
+                      {#each player.tags as tag}<span>{tag}</span>{/each}
+                    </div>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          {:else if databasePlayers}
+            <p class="muted">
+              {databasePlayers.rows.length
+                ? "No database players match the current filter."
+                : "The database has no player_state rows yet."}
+            </p>
+          {:else}
+            <p class="muted">Loading the player directory. This is a controlled database view, not raw SQL access.</p>
+          {/if}
+        </section>
         <section class="panel player-activity-panel">
           <div class="split-heading">
             <div>
@@ -2309,7 +2398,6 @@
               <p class="muted">Director player IDs grouped into one operational view. Full mode adds transit, grace, completion, and queue buckets.</p>
             </div>
             <div class="actions">
-              <input bind:value={playerFilter} placeholder="Filter player ID or status" />
               <button disabled={playersBusy} on:click={() => loadPlayerLists(false)}>
                 {playersBusy && !playersFull ? "Loading..." : playerLists && !playersFull ? "Refresh active" : "Load active"}
               </button>
