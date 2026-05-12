@@ -179,7 +179,7 @@
   $: selectedPodSummary = pods.find((pod) => pod.name === selectedPod);
   $: battlegroupStopped = battlegroup?.stop ?? true;
   $: settingsDraftSections = settingsDraft ? parseIniSections(settingsDraft) : [];
-  $: visibleSettingsSections = filterIniSections(settingsDraftSections, settingsFilter).slice(0, 16);
+  $: visibleSettingsSections = filterIniSections(settingsDraftSections, settingsFilter);
   $: visiblePods = filterPods(pods, workloadFilter);
   $: visibleServices = filterServices(services, workloadFilter);
   $: visibleEvents = filterEvents(events, workloadFilter);
@@ -198,9 +198,9 @@
   $: runningPods = pods.filter((pod) => pod.ready).length;
   $: onlineMaps = (overview?.maps ?? []).filter((map) => map.servers.some((server) => server.status === "Running")).length;
   $: dashboardMaps = selectDashboardMaps(overview);
-  $: directorFlsFields = jsonPrimitiveFields(directorFlsDraft).slice(0, 80);
-  $: directorTransferFields = jsonPrimitiveFields(directorTransferDraft).slice(0, 80);
-  $: directorMapFields = jsonPrimitiveFields(directorMapDraft).slice(0, 80);
+  $: directorFlsFields = jsonPrimitiveFields(directorFlsDraft);
+  $: directorTransferFields = jsonPrimitiveFields(directorTransferDraft);
+  $: directorMapFields = jsonPrimitiveFields(directorMapDraft);
   $: playerRows = playerActivityRows(playerLists);
   $: visiblePlayerRows = filterPlayerRows(playerRows, playerFilter);
   $: visibleDatabasePlayers = filterDatabasePlayers(databasePlayers?.rows ?? [], playerFilter);
@@ -2195,6 +2195,10 @@
                 <strong>{settingsDraftSections.length}</strong>
               </div>
               <div>
+                <span>Visible</span>
+                <strong>{visibleSettingsSections.reduce((count, section) => count + section.entries.length, 0)}</strong>
+              </div>
+              <div>
                 <span>Status</span>
                 <strong>{settingsDraft === settingsFile.content ? "Saved" : "Unsaved changes"}</strong>
               </div>
@@ -2212,7 +2216,7 @@
                   <details open>
                     <summary>{section.name} <span>{section.entries.length}</span></summary>
                     <div class="setting-grid">
-                      {#each section.entries.slice(0, 32) as entry}
+                      {#each section.entries as entry}
                         <label class="setting-field">
                           <span>{settingDisplayName(entry.key)}</span>
                           <small>{entry.key}</small>
@@ -2229,9 +2233,11 @@
                         </label>
                       {/each}
                     </div>
-                    {#if section.entries.length > 32}<p class="muted setting-note">Showing first 32 matching entries in this section.</p>{/if}
                   </details>
                 {/each}
+                {#if !visibleSettingsSections.length}
+                  <p class="muted">No settings match the current filter.</p>
+                {/if}
               </div>
             </div>
             <details class="advanced-ini">
