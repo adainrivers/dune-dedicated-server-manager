@@ -114,7 +114,7 @@ jobs:
 
           $tauriConfigPath = "app/src-tauri/tauri.conf.json"
           $config = Get-Content $tauriConfigPath -Raw
-          $config = $config.Replace('"version": "0.1.0"', ('"version": "' + $version + '"'))
+          $config = $config -replace '"version":\s*"[^"]+"', ('"version": "' + $version + '"')
           $config = $config.Replace("__TAURI_UPDATER_PUBLIC_KEY__", $env:TAURI_UPDATER_PUBLIC_KEY)
           $config = $config.Replace("__GITHUB_REPOSITORY__", "${{ github.repository }}")
           Set-Content -Path $tauriConfigPath -Value $config -NoNewline

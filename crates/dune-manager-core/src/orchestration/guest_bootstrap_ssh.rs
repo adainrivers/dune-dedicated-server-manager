@@ -431,10 +431,15 @@ escape_sed_pipe() { printf '%s' "$1" | sed -e 's/[|&]/\\&/g'; }
 cp "$G_SCRIPT_PATH/templates/world-template.yaml" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 cp "$G_SCRIPT_PATH/templates/fls-secret.yaml" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-fls-secret.yaml"
 cp "$G_SCRIPT_PATH/templates/rmq-secret.yaml" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-rmq-secret.yaml"
+WORLD_IMAGE_TAG=$(cat "$G_SPEC_PATH/download/images/battlegroup/version.txt")
+if [ -z "$WORLD_IMAGE_TAG" ]; then
+  echo "Battlegroup image version is empty" >&2
+  exit 1
+fi
 sed -i "s/{WORLD_NAME}/$(escape_sed "$WORLD_NAME")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 sed -i "s/{WORLD_UNIQUE_NAME}/$(escape_sed "$WORLD_UNIQUE_NAME")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 sed -i "s/{WORLD_REGION}/$(escape_sed "$WORLD_REGION")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
-sed -i "s/{WORLD_IMAGE_TAG}/0-0-shipping/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
+sed -i "s/{WORLD_IMAGE_TAG}/$(escape_sed "$WORLD_IMAGE_TAG")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 sed -i "s/{FLS_SECRET}/$(escape_sed "$FLS_TOKEN")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 sed -i "s/{FLS_SECRET}/$(escape_sed "$FLS_TOKEN")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-fls-secret.yaml"
 sed -i "s|{RMQ_SECRET}|$(escape_sed_pipe "$RMQ_SECRET")|g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-rmq-secret.yaml"
@@ -647,6 +652,10 @@ mod tests {
         let script = scripts.borrow().first().cloned().unwrap();
         assert!(script.contains("printf '{\"namespace\":\"%s\",\"battlegroupName\":\"%s\"}"));
         assert!(script.contains("kubectl create ns \"$NS\" >&2"));
+        assert!(script.contains(
+            "WORLD_IMAGE_TAG=$(cat \"$G_SPEC_PATH/download/images/battlegroup/version.txt\")"
+        ));
+        assert!(!script.contains("s/{WORLD_IMAGE_TAG}/0-0-shipping/g"));
     }
 
     #[test]

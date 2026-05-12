@@ -177,14 +177,14 @@ async fn auth_logout() -> Response {
 async fn auth_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<Json<SessionResponse>, ApiError> {
-    authorize(&state, &headers, None)?;
-    Ok(Json(SessionResponse {
-        authenticated: true,
+) -> Json<SessionResponse> {
+    let authenticated = authorize(&state, &headers, None).is_ok();
+    Json(SessionResponse {
+        authenticated,
         api_version: MANAGER_API_VERSION,
         namespace: state.namespace.clone(),
         auth_enabled: state.token.is_some(),
-    }))
+    })
 }
 
 fn auth_cookie(token: &str, max_age_seconds: u64) -> String {

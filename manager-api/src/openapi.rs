@@ -67,7 +67,7 @@ pub fn document() -> Value {
             "/api/auth/session": {
                 "get": {
                     "summary": "Current browser/API session",
-                    "responses": { "200": { "description": "Session metadata" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+                    "responses": { "200": { "description": "Session metadata" } }
                 }
             },
             "/api/status": {

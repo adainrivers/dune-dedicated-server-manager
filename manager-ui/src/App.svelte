@@ -34,7 +34,8 @@
 
   async function loadSession() {
     try {
-      session = await api<Session>("/api/auth/session");
+      const current = await api<Session>("/api/auth/session");
+      session = current.authenticated ? current : null;
     } catch {
       session = null;
     }
@@ -153,6 +154,7 @@
       <h1>Sign in</h1>
       <p>Use your Self-Host Service Token to manage this server.</p>
       <form on:submit|preventDefault={signIn}>
+        <input class="sr-only" type="text" autocomplete="username" value="self-host-token" tabindex="-1" aria-hidden="true" />
         <label>
           Self-Host Service Token
           <input bind:value={token} type="password" autocomplete="current-password" placeholder="Paste token" />
