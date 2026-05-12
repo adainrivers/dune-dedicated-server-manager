@@ -97,6 +97,7 @@
   let settingsPreviewBusy = false;
   let settingsPreview: UserSettingsPreviewResponse | null = null;
   let settingsBackupBusy = "";
+  let settingsAutoLoading = false;
   let settingsBackups: UserSettingsBackupsResponse | null = null;
   let settingsNotice = "";
   let settingsFilter = "";
@@ -204,6 +205,19 @@
       session = current.authenticated ? current : null;
     } catch {
       session = null;
+    }
+  }
+
+  function openPage(nextPage: Page) {
+    page = nextPage;
+    if (nextPage === "config" && !settingsFile && !settingsAutoLoading) {
+      settingsAutoLoading = true;
+      void loadSettingsFile().finally(() => {
+        settingsAutoLoading = false;
+      });
+    }
+    if (nextPage === "database" && !databaseMaintenance && !databaseBusy) {
+      void loadDatabaseMaintenance(false);
     }
   }
 
@@ -748,6 +762,21 @@
     settingsPreview = null;
   }
 
+  function settingFieldKind(value: string) {
+    const text = value.trim();
+    if (/^(true|false)$/i.test(text)) return "boolean";
+    if (/^-?\d+(\.\d+)?$/.test(text)) return "number";
+    return "text";
+  }
+
+  function settingDisplayName(key: string) {
+    return key
+      .replace(/^m_/, "")
+      .replace(/_/g, " ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .trim();
+  }
+
   function parseIniSections(content: string): IniSection[] {
     const sections: IniSection[] = [];
     let current: IniSection = { name: "Global", entries: [] };
@@ -1208,7 +1237,7 @@
         <span>{session.namespace}</span>
       </div>
       {#each navItems as item}
-        <button class:active={page === item.page} on:click={() => (page = item.page)}>
+        <button class:active={page === item.page} on:click={() => openPage(item.page)}>
           {item.label}
         </button>
       {/each}
@@ -1265,7 +1294,7 @@
                 <button
                   class:danger={action.danger}
                   disabled={action.disabled}
-                  on:click={() => action.action ? lifecycle(action.action) : action.page ? (page = action.page) : refresh()}
+                  on:click={() => action.action ? lifecycle(action.action) : action.page ? openPage(action.page) : refresh()}
                 >
                   <strong>{action.label}</strong>
                   <span>{action.hint}</span>
@@ -1280,7 +1309,7 @@
                 <h2>Players</h2>
                 <p class="muted">Current Director player buckets.</p>
               </div>
-              <button class="inline" on:click={() => (page = "players")}>Open</button>
+              <button class="inline" on:click={() => openPage("players")}>Open</button>
             </div>
             <div class="player-summary">
               <div><span>Active</span><b>{overview?.players?.active ?? 0}</b></div>
@@ -1297,7 +1326,7 @@
                 <h2>Map Population</h2>
                 <p class="muted">Player load and shard status from Director.</p>
               </div>
-              <button class="inline" on:click={() => (page = "director")}>Rules</button>
+              <button class="inline" on:click={() => openPage("director")}>Rules</button>
             </div>
             <div class="map-list">
               {#each dashboardMaps as map}
@@ -1320,7 +1349,7 @@
                 <h2>Backups</h2>
                 <p class="muted">Database protection state for this battlegroup.</p>
               </div>
-              <button class="inline" on:click={() => (page = "database")}>Open</button>
+              <button class="inline" on:click={() => openPage("database")}>Open</button>
             </div>
             {#if databaseMaintenance}
               <div class="rows compact">
@@ -1633,8 +1662,8 @@
         <section class="panel form">
           <div class="split-heading">
             <div>
-              <h2>User Settings</h2>
-              <p class="muted">Edit the runtime ini files mounted through the filebrowser volume.</p>
+              <h2>Game Settings</h2>
+              <p class="muted">Tune the player-facing INI settings through controlled fields. Raw file access stays tucked away for diagnostics.</p>
             </div>
             {#if settingsFile}
               <div class="actions">
@@ -1642,7 +1671,7 @@
                   {settingsPreviewBusy ? "Previewing..." : "Preview changes"}
                 </button>
                 <button disabled={settingsSaving || settingsDraft === settingsFile.content} on:click={saveSettingsFile}>
-                  {settingsSaving ? "Saving..." : "Save file"}
+                  {settingsSaving ? "Saving..." : "Save settings"}
                 </button>
               </div>
             {/if}
@@ -1655,30 +1684,55 @@
             {/each}
           </div>
           {#if !settingsFile}
-            <button on:click={() => loadSettingsFile()}>Load settings file</button>
+            <button disabled={settingsAutoLoading} on:click={() => loadSettingsFile()}>
+              {settingsAutoLoading ? "Loading settings..." : "Load settings"}
+            </button>
           {:else}
-            <div class="rows compact">
-              <div class="row"><span>Path</span><b>{settingsFile.path}</b></div>
-              <div class="row"><span>Size</span><b>{settingsFile.sizeBytes} bytes</b></div>
-              <div class="row"><span>Sections</span><b>{settingsDraftSections.length}</b></div>
+            <div class="settings-status">
+              <div>
+                <span>Editing</span>
+                <strong>{settingsFile.fileName}</strong>
+              </div>
+              <div>
+                <span>Fields</span>
+                <strong>{settingsDraftSections.reduce((count, section) => count + section.entries.length, 0)}</strong>
+              </div>
+              <div>
+                <span>Sections</span>
+                <strong>{settingsDraftSections.length}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong>{settingsDraft === settingsFile.content ? "Saved" : "Unsaved changes"}</strong>
+              </div>
             </div>
             <div class="structured-editor">
               <div class="editor-title">
                 <div>
-                  <h3>Structured editor</h3>
-                  <p class="muted">Edit values safely while preserving comments, ordering, duplicate keys, and raw syntax.</p>
+                  <h3>Controlled fields</h3>
+                  <p class="muted">Values are written back into the original INI while preserving comments, ordering, and duplicate keys.</p>
                 </div>
                 <input bind:value={settingsFilter} placeholder="Filter section, key, or value" />
               </div>
-              <div class="section-list">
+              <div class="settings-section-list">
                 {#each visibleSettingsSections as section}
                   <details open>
                     <summary>{section.name} <span>{section.entries.length}</span></summary>
                     <div class="setting-grid">
                       {#each section.entries.slice(0, 32) as entry}
-                        <label>
-                          <span>{entry.key}</span>
-                          <input value={entry.value} on:input={(event) => updateSettingsEntry(entry.line, event.currentTarget.value)} />
+                        <label class="setting-field">
+                          <span>{settingDisplayName(entry.key)}</span>
+                          <small>{entry.key}</small>
+                          {#if settingFieldKind(entry.value) === "boolean"}
+                            <select value={entry.value.toLowerCase() === "true" ? "True" : "False"} on:change={(event) => updateSettingsEntry(entry.line, event.currentTarget.value)}>
+                              <option>True</option>
+                              <option>False</option>
+                            </select>
+                          {:else if settingFieldKind(entry.value) === "number"}
+                            <input type="number" value={entry.value} on:input={(event) => updateSettingsEntry(entry.line, event.currentTarget.value)} />
+                          {:else}
+                            <input value={entry.value} on:input={(event) => updateSettingsEntry(entry.line, event.currentTarget.value)} />
+                          {/if}
                         </label>
                       {/each}
                     </div>
@@ -1687,7 +1741,10 @@
                 {/each}
               </div>
             </div>
-            <textarea bind:value={settingsDraft} on:input={markSettingsDraftChanged} spellcheck="false"></textarea>
+            <details class="advanced-ini">
+              <summary>Advanced raw INI view <span>{settingsFile.path}</span></summary>
+              <textarea bind:value={settingsDraft} on:input={markSettingsDraftChanged} spellcheck="false"></textarea>
+            </details>
             {#if settingsPreview}
               <section class="diff-panel">
                 <div class="editor-title">
@@ -1759,18 +1816,6 @@
                 <p class="muted">No backups found for this file yet.</p>
               {/if}
             </section>
-            <div class="section-list compact-preview">
-              {#each settingsFile.sections.slice(0, 12) as section}
-                <details>
-                  <summary>{section.name} <span>{section.entries.length}</span></summary>
-                  <div class="rows compact">
-                    {#each section.entries.slice(0, 12) as entry}
-                      <div class="row"><span>{entry.key}</span><b>{entry.value}</b></div>
-                    {/each}
-                  </div>
-                </details>
-              {/each}
-            </div>
           {/if}
         </section>
       {:else if page === "director"}

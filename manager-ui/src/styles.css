@@ -530,19 +530,54 @@ header,
   gap: 0.5rem;
 }
 
-.section-list details {
+.section-list details,
+.settings-section-list details,
+.advanced-ini {
   border: 1px solid rgba(214, 175, 105, 0.18);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.025);
 }
 
-.section-list summary {
+.section-list summary,
+.settings-section-list summary,
+.advanced-ini summary {
   cursor: pointer;
   padding: 0.75rem 0.85rem;
 }
 
-.section-list summary span {
+.section-list summary span,
+.settings-section-list summary span,
+.advanced-ini summary span {
   color: #b9aa91;
+}
+
+.settings-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.settings-status div {
+  padding: 0.8rem;
+  border: 1px solid rgba(214, 187, 133, 0.13);
+  border-radius: 8px;
+  background: rgba(8, 7, 6, 0.34);
+}
+
+.settings-status span,
+.setting-field small {
+  display: block;
+  color: #b9aa91;
+  font-size: 0.76rem;
+}
+
+.settings-status strong {
+  display: block;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  color: #f2d492;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .structured-editor {
@@ -558,6 +593,11 @@ header,
   margin-bottom: 0;
 }
 
+.settings-section-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
 .setting-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -565,14 +605,26 @@ header,
   padding: 0 0.85rem 0.85rem;
 }
 
-.setting-grid label {
+.setting-field {
   display: grid;
   gap: 0.35rem;
+  align-content: start;
+  min-height: 6.6rem;
+  padding: 0.7rem;
+  border: 1px solid rgba(214, 187, 133, 0.11);
+  border-radius: 8px;
+  background: rgba(8, 7, 6, 0.28);
 }
 
-.setting-grid label span {
+.setting-field span {
   color: #b9aa91;
-  font-size: 0.78rem;
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setting-field small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -581,6 +633,14 @@ header,
 .setting-note {
   margin: 0;
   padding: 0 0.85rem 0.85rem;
+}
+
+.advanced-ini textarea {
+  min-height: 260px;
+  border: 0;
+  border-top: 1px solid rgba(214, 175, 105, 0.14);
+  border-radius: 0;
+  background: rgba(8, 7, 6, 0.48);
 }
 
 .compact-preview {
@@ -1156,6 +1216,7 @@ header,
   .layout-board,
   .layout-summary,
   .setting-grid,
+  .settings-status,
   .workload-grid,
   .workload-card,
   .event-list article,
