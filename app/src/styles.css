@@ -171,6 +171,11 @@ button:disabled,
   pointer-events: none;
 }
 
+.is-flow-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .setup-section {
   padding: var(--space-4);
   border: 1px solid var(--gray-a5);
@@ -185,15 +190,27 @@ button:disabled,
 }
 
 .setup-order-world {
-  order: 1;
-}
-
-.setup-order-layout {
   order: 2;
 }
 
-.setup-order-vm {
+.setup-order-remote-host {
+  order: 1;
+}
+
+.setup-order-world-ubuntu {
+  order: 2;
+}
+
+.setup-order-layout {
   order: 3;
+}
+
+.setup-order-layout-ubuntu {
+  order: 3;
+}
+
+.setup-order-vm {
+  order: 1;
 }
 
 .setup-order-network {
@@ -243,6 +260,41 @@ button:disabled,
   background: var(--amber-a2);
 }
 
+.setup-guide,
+.generated-key-box {
+  padding: var(--space-3);
+  border: 1px solid var(--bronze-a6);
+  border-radius: var(--radius-3);
+  background: var(--bronze-a2);
+}
+
+.setup-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding-left: 1.1rem;
+  color: var(--gray-11);
+  font-size: var(--font-size-2);
+  line-height: var(--line-height-2);
+}
+
+.setup-warning-pills {
+  line-height: 1;
+}
+
+.setup-detect-button {
+  width: 100%;
+}
+
+.checkbox-copy-row {
+  min-height: 32px;
+}
+
+.checkbox-copy-row .rt-CheckboxRoot {
+  flex: 0 0 auto;
+}
+
 .destructive-warning {
   padding: var(--space-3);
   border: 1px solid var(--red-a6);
@@ -287,6 +339,113 @@ button:disabled,
   background:
     linear-gradient(145deg, var(--bronze-a3), transparent 36%),
     var(--gray-a2);
+}
+
+.server-error {
+  white-space: pre-wrap;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--red-a6);
+  border-radius: var(--radius-3);
+  color: var(--red-11);
+  background: var(--red-a2);
+}
+
+.component-health {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--gray-a4);
+}
+
+.component-group-title {
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.component-group {
+  border: 1px solid var(--gray-a4);
+  border-radius: var(--radius-3);
+  padding: var(--space-2);
+  background: var(--gray-a1);
+}
+
+.component-group[open] {
+  border-color: var(--gray-a6);
+}
+
+.component-group-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.component-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.component-group-summary:hover .component-group-title {
+  color: var(--gray-12);
+}
+
+.component-row {
+  border: 1px solid var(--gray-a4);
+  border-radius: var(--radius-3);
+  background: var(--gray-a2);
+}
+
+.component-row[open] {
+  border-color: var(--bronze-a6);
+}
+
+.component-summary {
+  display: flex;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.component-summary::-webkit-details-marker {
+  display: none;
+}
+
+.component-summary:hover {
+  background: var(--gray-a3);
+}
+
+.component-summary-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.component-body {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.component-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--space-1) 0 0;
+  padding-left: 1rem;
+  color: var(--gray-11);
+  font-size: var(--font-size-1);
+  line-height: var(--line-height-1);
+}
+
+.component-log {
+  max-height: 220px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--gray-a4);
+  border-radius: var(--radius-3);
+  background: var(--gray-a1);
+  line-height: 1.25;
+}
+
+.inline-spinner {
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid var(--bronze-a5);
+  border-top-color: var(--bronze-10);
+  border-radius: 50%;
+  animation: boot-spin 900ms linear infinite;
 }
 
 .server-card.is-clickable {

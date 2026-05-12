@@ -51,7 +51,7 @@ jobs:
       - name: Secret and machine-constant scan
         shell: pwsh
         run: |
-          rg -n -S "I:|AutoUpdate|192\.168\.2\.|menna|dune-awakening|C:\\WINDOWS\\System32\\OpenSSH|C:\\Windows\\System32\\OpenSSH|change-me-before-exposing|c05564d|d177d3bbc40be761|qRmQx|FuncomLiveServices__ServiceAuthToken" . -g "!app/**/target/**" -g "!crates/**/target/**" -g "!manager-api/target/**" -g "!target/**" -g "!app/node_modules/**" -g "!app/dist/**" -g "!*.md" -g "!app/steamcmd/**" -g "!app/dune-server/**" -g "!app/vm/**" -g "!app/vm-*/**" -g "!vm/**" -g "!.tmp/**"
+          rg -n -S "I:|AutoUpdate|192\.168\.2\.|menna|dune-awakening|C:\\WINDOWS\\System32\\OpenSSH|C:\\Windows\\System32\\OpenSSH|change-me-before-exposing|c05564d|d177d3bbc40be761|qRmQx|FuncomLiveServices__ServiceAuthToken" . -g "!app/**/target/**" -g "!crates/**/target/**" -g "!target/**" -g "!app/node_modules/**" -g "!app/dist/**" -g "!*.md" -g "!app/steamcmd/**" -g "!app/dune-server/**" -g "!app/vm/**" -g "!app/vm-*/**" -g "!vm/**" -g "!.tmp/**"
           if ($LASTEXITCODE -eq 0) {
             throw "Secret or machine-specific constant scan found matches."
           }

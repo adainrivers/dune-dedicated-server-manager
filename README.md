@@ -2,85 +2,34 @@
 
 A Windows-first manager for the Dune Awakening Playtest dedicated server.
 
-The app provisions and manages the vendor Hyper-V server package through a Rust core library, local managed tools, guest SSH bootstrap, and a VM-side Manager API.
+![Dune Dedicated Server Manager](images/screenshot.png)
 
-## Installation
+The app provisions and manages Dune dedicated servers through a Rust core library, managed local tools, Hyper-V or remote Ubuntu setup, SSH bootstrap, and Kubernetes control commands.
+
+## Installation Guide
 
 1. Download the latest Windows installer from GitHub Releases.
 2. Run the installer.
 3. Start Dune Dedicated Server Manager from the Start menu or installed shortcut.
-4. Approve the Windows administrator prompt.
-5. In the app, configure:
-   - Self-Host Service Token
-   - World name and region
-   - Hagga Basin, Social Hubs, and Deep Desert layout
-   - VM memory, disk size, location, and network settings
-6. Click Start Full Setup.
+4. Approve the Windows administrator prompt when using local Hyper-V setup.
+5. Create a new server from the app.
 
-The setup flow installs app-owned copies of SteamCMD and OpenSSH, downloads the server package, imports the Hyper-V VM, bootstraps the guest, configures k3s resources, applies the selected world layout, and starts the battlegroup.
+The app guides you through detecting the host, choosing a server layout, entering your Self-Host Service Token, and starting provisioning.
 
-## Requirements
+## Server Setup Guides
 
-- Windows 10 or Windows 11 with Hyper-V support.
-- Administrator access.
-- Virtualization enabled in BIOS or UEFI.
-- Hyper-V installed and running.
-- Enough physical memory for the selected layout.
-- Enough disk space for the VM destination.
-- A Dune Awakening Self-Host Service Token.
+- [Remote Ubuntu setup guide](docs/ubuntu-setup-guide.md)
+- [Local Hyper-V setup guide](docs/hyper-v-setup-guide.md)
 
-If you choose an external player-facing IP, forward these ports to the VM:
+Required game ports:
 
-- 7777-7810 UDP for game servers.
-- 31982 TCP for RMQ.
+- UDP 7777-7810 for game servers
+- TCP 31982 for RMQ
 
-## Auto Update
+## Building From Source
 
-Release builds check GitHub Releases for signed updates. The app asks before installing an update, then relaunches after installation.
+See [Building From Source](docs/building-from-source.md).
 
-## Building From Code
+## License
 
-Prerequisites:
-
-- Rust stable
-- Node.js 22
-- npm
-- Windows with the WebView2 runtime
-- Git
-
-Install dependencies:
-
-```powershell
-cd app
-npm ci
-```
-
-Run local checks:
-
-```powershell
-cargo check --workspace
-cargo test --workspace
-cargo doc -p dune-manager-core --no-deps
-cd app
-npm run build
-```
-
-Run the desktop app in development:
-
-```powershell
-cd app
-npm run tauri -- dev
-```
-
-Build the Windows installer:
-
-```powershell
-cd app
-npm run tauri -- build
-```
-
-Build the VM-side Manager API for Linux from WSL:
-
-```powershell
-wsl -d Ubuntu-22.04 -- bash -lc "cd /mnt/f/Dune/Development/DedicatedServerManager/manager-api && cargo build --target x86_64-unknown-linux-musl --release"
-```
+MIT License. See [LICENSE](LICENSE).

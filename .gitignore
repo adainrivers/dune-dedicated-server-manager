@@ -28,6 +28,8 @@ pnpm-debug.log*
 # Docs are scratch notes for now; keep README trackable later
 *.md
 !README.md
+!docs/
+!docs/*.md
 
 # Editor and OS noise
 .idea/
@@ -43,6 +45,7 @@ Desktop.ini
 app/default-config.json
 app/steamcmd/
 app/dune-server/
+dune-server/
 app/vm/
 app/vm-*/
 app/src-tauri/dune-server/

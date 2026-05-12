@@ -64,6 +64,46 @@ pub struct UbuntuSshPreflight {
     pub kubectl_available: bool,
 }
 
+/// Request for creating and enabling a native Ubuntu swapfile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UbuntuSwapRequest {
+    /// Swapfile size in GiB.
+    pub swap_size_gib: u64,
+}
+
+impl UbuntuSwapRequest {
+    /// Creates a request for a fixed-size `/swapfile`.
+    pub fn new(swap_size_gib: u64) -> Self {
+        Self { swap_size_gib }
+    }
+
+    /// Validates the requested swapfile size.
+    pub fn validate(&self) -> CommandResult<()> {
+        if !(1..=256).contains(&self.swap_size_gib) {
+            return Err(failure("Ubuntu swap size must be between 1 and 256 GiB"));
+        }
+        Ok(())
+    }
+}
+
+/// Result of applying the native Ubuntu swapfile configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UbuntuSwapResult {
+    /// Whether a swapfile exists after configuration.
+    pub swap_file_exists: bool,
+    /// Whether swap is active after configuration.
+    pub swap_active: bool,
+    /// Configured `/swapfile` size in bytes.
+    pub swap_file_bytes: u64,
+    /// Total swap bytes reported by `/proc/meminfo`.
+    pub swap_total_bytes: u64,
+    /// Whether `/etc/fstab` contains the `/swapfile` entry.
+    pub fstab_configured: bool,
+    /// Whether k3s kubelet is configured for limited swap.
+    pub kubelet_swap_configured: bool,
+}
+
 /// Request for preparing a fresh Ubuntu host for Dune server installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UbuntuSshPrepareRequest {
@@ -190,6 +230,26 @@ where
         );
         self.runner.run_script(K3S_INSTALL_SCRIPT)?;
         Ok(())
+    }
+
+    /// Creates and enables a native Ubuntu swapfile for low-memory hosts.
+    pub fn configure_swap(
+        &self,
+        request: &UbuntuSwapRequest,
+        sink: &mut impl OperationSink,
+    ) -> CommandResult<UbuntuSwapResult> {
+        request.validate()?;
+        emit(
+            sink,
+            "ubuntu.swap.native",
+            "Creating or validating Ubuntu swapfile.",
+            StepDomain::Guest,
+            StepAction::Configure,
+        );
+        let output = self
+            .runner
+            .run_script(&ubuntu_swap_script(request.swap_size_gib))?;
+        parse_single_json_document(&output, "ubuntu swap")
     }
 
     /// Bootstraps cert-manager and the initial Funcom operator deployments on fresh Ubuntu.
@@ -448,6 +508,86 @@ printf '{{"downloadPath":%s,"setupScriptPresent":%s,"battlegroupScriptPresent":%
     )
 }
 
+fn ubuntu_swap_script(swap_size_gib: u64) -> String {
+    format!(
+        r#"
+set -eu
+swap_size_gib={swap_size_gib}
+swap_bytes=$((swap_size_gib * 1024 * 1024 * 1024))
+
+if [ "$(id -u)" -ne 0 ] && ! sudo -n true >/dev/null 2>&1; then
+  echo "This setup phase requires root or passwordless sudo." >&2
+  exit 1
+fi
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+
+if [ ! -f /swapfile ] || [ "$(stat -c '%s' /swapfile 2>/dev/null || echo 0)" -lt "$swap_bytes" ]; then
+  $SUDO swapoff /swapfile >/dev/null 2>&1 || true
+  $SUDO rm -f /swapfile
+  if command -v fallocate >/dev/null 2>&1; then
+    $SUDO fallocate -l "$swap_bytes" /swapfile
+  else
+    $SUDO dd if=/dev/zero of=/swapfile bs=1M count=$((swap_size_gib * 1024)) status=none
+  fi
+  $SUDO chmod 600 /swapfile
+  $SUDO mkswap /swapfile >/dev/null
+fi
+
+if ! grep -Eq '^[[:space:]]*/swapfile[[:space:]]' /etc/fstab 2>/dev/null; then
+  printf '/swapfile none swap sw 0 0\n' | $SUDO tee -a /etc/fstab >/dev/null
+fi
+
+$SUDO swapon /swapfile >/dev/null 2>&1 || true
+
+$SUDO mkdir -p /etc/rancher/k3s
+if [ ! -f /etc/rancher/k3s/kubelet-config.yaml ] \
+  || ! grep -Eq '^[[:space:]]*kind:[[:space:]]*KubeletConfiguration[[:space:]]*$' /etc/rancher/k3s/kubelet-config.yaml \
+  || ! grep -Eq '^[[:space:]]*failSwapOn:[[:space:]]*false[[:space:]]*$' /etc/rancher/k3s/kubelet-config.yaml; then
+  printf 'apiVersion: kubelet.config.k8s.io/v1beta1\nkind: KubeletConfiguration\nfailSwapOn: false\nmemorySwap:\n  swapBehavior: LimitedSwap\n' | $SUDO tee /etc/rancher/k3s/kubelet-config.yaml >/dev/null
+fi
+if [ ! -f /etc/rancher/k3s/config.yaml ]; then
+  printf 'kubelet-arg:\n- config=/etc/rancher/k3s/kubelet-config.yaml\n' | $SUDO tee /etc/rancher/k3s/config.yaml >/dev/null
+elif grep -q 'kubelet-arg:' /etc/rancher/k3s/config.yaml && ! grep -q 'config=/etc/rancher/k3s/kubelet-config.yaml' /etc/rancher/k3s/config.yaml; then
+  echo "k3s config already has kubelet-arg entries; cannot safely add swap config automatically" >&2
+  exit 1
+elif ! grep -q 'config=/etc/rancher/k3s/kubelet-config.yaml' /etc/rancher/k3s/config.yaml; then
+  printf '\nkubelet-arg:\n- config=/etc/rancher/k3s/kubelet-config.yaml\n' | $SUDO tee -a /etc/rancher/k3s/config.yaml >/dev/null
+fi
+
+if systemctl is-active --quiet k3s 2>/dev/null; then
+  $SUDO systemctl restart k3s
+fi
+
+swap_file_exists=false
+swap_active=false
+swap_file_bytes=0
+swap_total_bytes=0
+fstab_configured=false
+kubelet_swap_configured=false
+
+[ -f /swapfile ] && swap_file_exists=true
+[ -f /swapfile ] && swap_file_bytes=$(stat -c '%s' /swapfile 2>/dev/null || echo 0)
+if awk '$1 == "/swapfile" {{ found = 1 }} END {{ exit(found ? 0 : 1) }}' /proc/swaps 2>/dev/null; then
+  swap_active=true
+fi
+swap_total_bytes=$(awk '$1 == "SwapTotal:" {{ print $2 * 1024 }}' /proc/meminfo 2>/dev/null | head -n1)
+[ -n "$swap_total_bytes" ] || swap_total_bytes=0
+if grep -Eq '^[[:space:]]*/swapfile[[:space:]]' /etc/fstab 2>/dev/null; then
+  fstab_configured=true
+fi
+if grep -Eq '^[[:space:]]*kind:[[:space:]]*KubeletConfiguration[[:space:]]*$' /etc/rancher/k3s/kubelet-config.yaml 2>/dev/null \
+  && grep -Eq '^[[:space:]]*failSwapOn:[[:space:]]*false[[:space:]]*$' /etc/rancher/k3s/kubelet-config.yaml 2>/dev/null \
+  && grep -q 'config=/etc/rancher/k3s/kubelet-config.yaml' /etc/rancher/k3s/config.yaml 2>/dev/null; then
+  kubelet_swap_configured=true
+fi
+
+printf '{{"swapFileExists":%s,"swapActive":%s,"swapFileBytes":%s,"swapTotalBytes":%s,"fstabConfigured":%s,"kubeletSwapConfigured":%s}}\n' \
+  "$swap_file_exists" "$swap_active" "$swap_file_bytes" "$swap_total_bytes" "$fstab_configured" "$kubelet_swap_configured"
+"#
+    )
+}
+
 fn bootstrap_kubernetes_script(request: &UbuntuSshPrepareRequest) -> String {
     format!(
         r#"
@@ -459,6 +599,38 @@ if [ ! -d "$DOWNLOAD_PATH/images/operators/crds" ]; then
   exit 1
 fi
 
+wait_k3s_ready() {{
+  elapsed=0
+  while [ ! -S /run/k3s/containerd/containerd.sock ]; do
+    sleep 2
+    elapsed=$((elapsed + 2))
+    if [ "$elapsed" -ge 180 ]; then
+      echo "k3s containerd socket did not become ready in 180s" >&2
+      return 1
+    fi
+  done
+
+  elapsed=0
+  until sudo k3s ctr version >/dev/null 2>&1; do
+    sleep 2
+    elapsed=$((elapsed + 2))
+    if [ "$elapsed" -ge 180 ]; then
+      echo "k3s containerd did not accept commands in 180s" >&2
+      return 1
+    fi
+  done
+
+  elapsed=0
+  until sudo kubectl get nodes >/dev/null 2>&1; do
+    sleep 2
+    elapsed=$((elapsed + 2))
+    if [ "$elapsed" -ge 180 ]; then
+      echo "k3s API did not become ready in 180s" >&2
+      return 1
+    fi
+  done
+}}
+
 load_image_from_file() {{
   file_name="$1"
   if [ ! -f "$DOWNLOAD_PATH/$file_name" ]; then
@@ -466,26 +638,30 @@ load_image_from_file() {{
     exit 1
   fi
   attempt=1
-  while [ "$attempt" -le 3 ]; do
-    if sudo k3s ctr images import "$DOWNLOAD_PATH/$file_name" >/dev/null; then
+  while [ "$attempt" -le 8 ]; do
+    wait_k3s_ready
+    if out=$(sudo k3s ctr images import "$DOWNLOAD_PATH/$file_name" 2>&1); then
       return 0
     fi
-    sleep 5
+    printf '%s\n' "$out" >&2
+    sleep 10
     attempt=$((attempt + 1))
   done
-  echo "Failed to import $file_name after 3 attempts" >&2
+  echo "Failed to import $file_name after 8 attempts" >&2
   exit 1
 }}
 
 kubectl_retry() {{
   attempt=1
-  while [ "$attempt" -le 5 ]; do
+  last_out=""
+  while [ "$attempt" -le 30 ]; do
     if out=$(sudo kubectl "$@" 2>&1); then
       [ -n "$out" ] && printf '%s\n' "$out" >&2
       return 0
     fi
-    if printf '%s' "$out" | grep -qiE 'connection refused|unable to connect to the server|i/o timeout|tls handshake|no route to host|EOF'; then
-      sleep 5
+    last_out="$out"
+    if printf '%s' "$out" | grep -qiE 'connection refused|unable to connect to the server|i/o timeout|tls handshake|no route to host|EOF|ServiceUnavailable|currently unable to handle the request|Too Many Requests|timeout awaiting response headers'; then
+      sleep 10
       attempt=$((attempt + 1))
       continue
     fi
@@ -493,6 +669,28 @@ kubectl_retry() {{
     return 1
   done
   echo "kubectl $* still failing after retries" >&2
+  [ -n "$last_out" ] && printf '%s\n' "$last_out" >&2
+  return 1
+}}
+
+wait_k3s_settled() {{
+  elapsed=0
+  stable=0
+  while [ "$elapsed" -lt 300 ]; do
+    if sudo kubectl get --raw=/readyz >/dev/null 2>&1 \
+      && sudo kubectl get namespaces >/dev/null 2>&1 \
+      && sudo kubectl get nodes >/dev/null 2>&1; then
+      stable=$((stable + 1))
+      if [ "$stable" -ge 3 ]; then
+        return 0
+      fi
+    else
+      stable=0
+    fi
+    sleep 10
+    elapsed=$((elapsed + 10))
+  done
+  echo "k3s API did not stay ready for 3 consecutive checks within 300s" >&2
   return 1
 }}
 
@@ -512,6 +710,21 @@ scale_deployment() {{
   kubectl_retry scale -n "$ns" "deployment/$name" "--replicas=$replicas"
 }}
 
+wait_deployment_created() {{
+  ns="$1"
+  name="$2"
+  elapsed=0
+  until sudo kubectl get -n "$ns" deployment "$name" >/dev/null 2>&1; do
+    sleep 3
+    elapsed=$((elapsed + 3))
+    if [ "$elapsed" -ge 240 ]; then
+      echo "deployment $ns/$name did not appear within 240s" >&2
+      return 1
+    fi
+  done
+}}
+
+wait_k3s_ready
 load_image_from_file "images/prerequisites/coredns-coredns.tar"
 load_image_from_file "images/prerequisites/local-path-provisioner.tar"
 load_image_from_file "images/prerequisites/metrics-server.tar"
@@ -520,9 +733,13 @@ load_image_from_file "images/prerequisites/cert-manager-controller.tar"
 load_image_from_file "images/prerequisites/cert-manager-cainjector.tar"
 load_image_from_file "images/prerequisites/igw-postgres.tar"
 
+wait_k3s_settled
 if ! sudo kubectl get deployment cert-manager -n cert-manager >/dev/null 2>&1; then
-  kubectl_retry apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.8.0/cert-manager.yaml
+  kubectl_retry apply --validate=false -f https://github.com/cert-manager/cert-manager/releases/download/v1.8.0/cert-manager.yaml
 fi
+wait_deployment_created cert-manager cert-manager
+wait_deployment_created cert-manager cert-manager-cainjector
+wait_deployment_created cert-manager cert-manager-webhook
 scale_deployment kube-system coredns 1
 scale_deployment kube-system local-path-provisioner 1
 scale_deployment kube-system metrics-server 1
@@ -539,7 +756,7 @@ load_image_from_file "images/operators/database-operator.tar"
 load_image_from_file "images/operators/server-operator.tar"
 load_image_from_file "images/operators/utilities-operator.tar"
 
-kubectl_retry apply --server-side -f "$DOWNLOAD_PATH/images/operators/crds/"
+kubectl_retry apply --server-side --validate=false -f "$DOWNLOAD_PATH/images/operators/crds/"
 
 operator_version=$(cat "$DOWNLOAD_PATH/images/operators/version.txt")
 manifest="/tmp/dune-operator-deployments.yaml"
@@ -547,7 +764,7 @@ cat > "$manifest" <<'YAML'
 {operator_deployments}
 YAML
 sed -i "s/__OPERATOR_VERSION__/$operator_version/g" "$manifest"
-sudo kubectl apply -f "$manifest"
+kubectl_retry apply --validate=false -f "$manifest"
 rm -f "$manifest"
 
 for op in battlegroupoperator databaseoperator serveroperator utilitiesoperator; do

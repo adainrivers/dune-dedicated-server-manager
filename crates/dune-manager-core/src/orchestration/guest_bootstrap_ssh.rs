@@ -408,6 +408,12 @@ chmod +x /home/dune/.dune/download/scripts/battlegroup.sh
 
 fn create_world_script(request: &WorldManifestRequest) -> String {
     let namespace = format!("funcom-seabass-{}", request.world_unique_name);
+    let title_patch = json!({
+        "spec": {
+            "title": request.world_name.trim(),
+        }
+    })
+    .to_string();
     let mut script = String::from("set -eu\n");
     script.push_str("G_SPEC_PATH=/home/dune/.dune\n");
     script.push_str("G_SCRIPT_PATH=/home/dune/.dune/download/scripts/setup\n");
@@ -419,6 +425,7 @@ fn create_world_script(request: &WorldManifestRequest) -> String {
     ));
     script.push_str(&shell_value("NS", &namespace));
     script.push_str(&shell_value("FLS_TOKEN", request.self_host_token.trim()));
+    script.push_str(&shell_value("TITLE_PATCH", &title_patch));
     script.push_str(
         r#"
 if sudo kubectl get ns "$NS" >/dev/null 2>&1; then
@@ -431,15 +438,10 @@ escape_sed_pipe() { printf '%s' "$1" | sed -e 's/[|&]/\\&/g'; }
 cp "$G_SCRIPT_PATH/templates/world-template.yaml" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 cp "$G_SCRIPT_PATH/templates/fls-secret.yaml" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-fls-secret.yaml"
 cp "$G_SCRIPT_PATH/templates/rmq-secret.yaml" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-rmq-secret.yaml"
-WORLD_IMAGE_TAG=$(cat "$G_SPEC_PATH/download/images/battlegroup/version.txt")
-if [ -z "$WORLD_IMAGE_TAG" ]; then
-  echo "Battlegroup image version is empty" >&2
-  exit 1
-fi
 sed -i "s/{WORLD_NAME}/$(escape_sed "$WORLD_NAME")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 sed -i "s/{WORLD_UNIQUE_NAME}/$(escape_sed "$WORLD_UNIQUE_NAME")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 sed -i "s/{WORLD_REGION}/$(escape_sed "$WORLD_REGION")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
-sed -i "s/{WORLD_IMAGE_TAG}/$(escape_sed "$WORLD_IMAGE_TAG")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
+sed -i "s/{WORLD_IMAGE_TAG}/0-0-shipping/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 sed -i "s/{FLS_SECRET}/$(escape_sed "$FLS_TOKEN")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml"
 sed -i "s/{FLS_SECRET}/$(escape_sed "$FLS_TOKEN")/g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-fls-secret.yaml"
 sed -i "s|{RMQ_SECRET}|$(escape_sed_pipe "$RMQ_SECRET")|g" "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-rmq-secret.yaml"
@@ -462,6 +464,7 @@ sudo kubectl create ns "$NS" >&2
 sudo kubectl create -n "$NS" -f "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-fls-secret.yaml" >&2
 sudo kubectl create -n "$NS" -f "$G_SPEC_PATH/$WORLD_UNIQUE_NAME-rmq-secret.yaml" >&2
 sudo kubectl create -n "$NS" -f "$G_SPEC_PATH/$WORLD_UNIQUE_NAME.yaml" >&2
+sudo kubectl patch battlegroup "$WORLD_UNIQUE_NAME" -n "$NS" --type=merge -p "$TITLE_PATCH" >&2
 printf '%s' "$WORLD_UNIQUE_NAME" > /home/dune/.dune/.manager-bootstrap-world-name
 printf '{"namespace":"%s","battlegroupName":"%s"}\n' "$NS" "$WORLD_UNIQUE_NAME"
 "#,
@@ -652,10 +655,31 @@ mod tests {
         let script = scripts.borrow().first().cloned().unwrap();
         assert!(script.contains("printf '{\"namespace\":\"%s\",\"battlegroupName\":\"%s\"}"));
         assert!(script.contains("kubectl create ns \"$NS\" >&2"));
-        assert!(script.contains(
+        assert!(script.contains("s/{WORLD_IMAGE_TAG}/0-0-shipping/g"));
+        assert!(!script.contains(
             "WORLD_IMAGE_TAG=$(cat \"$G_SPEC_PATH/download/images/battlegroup/version.txt\")"
         ));
-        assert!(!script.contains("s/{WORLD_IMAGE_TAG}/0-0-shipping/g"));
+    }
+
+    #[test]
+    fn create_world_patches_full_title_after_template_creation() {
+        let remote = MockRemote::with_outputs([
+            r#"{"namespace":"funcom-seabass-sh-host-abcdef","battlegroupName":"sh-host-abcdef"}"#,
+        ]);
+        let scripts = remote.scripts.clone();
+        let provider = SshGuestBootstrapProvider::new(remote);
+        provider
+            .create_world(&WorldManifestRequest {
+                world_name: "Great Banana".to_string(),
+                world_region: "Europe Test".to_string(),
+                world_unique_name: "sh-host-abcdef".to_string(),
+                self_host_token: "header.payload.signature".to_string(),
+            })
+            .unwrap();
+
+        let script = scripts.borrow().first().cloned().unwrap();
+        assert!(script.contains("\"title\":\"Great Banana\""));
+        assert!(script.contains("kubectl patch battlegroup \"$WORLD_UNIQUE_NAME\""));
     }
 
     #[test]

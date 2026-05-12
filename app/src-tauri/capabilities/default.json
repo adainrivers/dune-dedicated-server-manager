@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default desktop app permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "process:default", "updater:default"]
+  "permissions": ["core:default", "dialog:allow-open", "process:default", "shell:allow-open", "updater:default"]
 }

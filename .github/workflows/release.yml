@@ -18,36 +18,9 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  manager-api:
-    name: Build Manager API
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
-
-      - name: Install musl tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Build Linux Manager API
-        run: cargo build -p dune-manager-api --target x86_64-unknown-linux-musl --release
-
-      - name: Upload Manager API artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: manager-api-x86_64-unknown-linux-musl
-          path: target/x86_64-unknown-linux-musl/release/dune-manager-api
-          if-no-files-found: error
-
   windows-app:
     name: Build Windows app
     runs-on: windows-latest
-    needs: manager-api
 
     steps:
       - name: Checkout
@@ -61,21 +34,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            app/package-lock.json
-            manager-ui/package-lock.json
+          cache-dependency-path: app/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: app
         run: npm ci
-
-      - name: Install Manager UI dependencies
-        working-directory: manager-ui
-        run: npm ci
-
-      - name: Build Manager UI
-        working-directory: manager-ui
-        run: npm run build
 
       - name: Resolve release version
         shell: pwsh
@@ -91,12 +54,6 @@ jobs:
           }
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           "RELEASE_TAG=v$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Download Manager API artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: manager-api-x86_64-unknown-linux-musl
-          path: app/src-tauri/resources/manager-api
 
       - name: Prepare release config
         shell: pwsh
@@ -129,6 +86,6 @@ jobs:
           projectPath: app
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: "Dune Dedicated Server Manager ${{ env.RELEASE_TAG }}"
-          releaseBody: "Windows installer, updater metadata, and bundled VM Manager API binary."
+          releaseBody: "Windows installer and updater metadata."
           releaseDraft: false
           prerelease: false

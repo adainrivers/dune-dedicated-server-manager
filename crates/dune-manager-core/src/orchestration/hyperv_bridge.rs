@@ -238,6 +238,16 @@ $items = @(Get-VM | Sort-Object Name | ForEach-Object {
   $vm = $_
   $adapters = @(Get-VMNetworkAdapter -VMName $vm.Name -ErrorAction SilentlyContinue)
   $ips = @($adapters.IPAddresses | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' })
+  $ips = @($ips | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' } | Select-Object -Unique)
+  if ($ips.Count -eq 0) {
+    $ips = @($adapters | ForEach-Object {
+      $m = $_.MacAddress; if ($m.Length -ne 12) { return }
+      $fmt = ($m -replace '(.{2})(.{2})(.{2})(.{2})(.{2})(.{2})', '$1-$2-$3-$4-$5-$6').ToUpper()
+      Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.LinkLayerAddress -ieq $fmt -and $_.IPAddress -notlike '169.254.*' -and $_.State -in @('Reachable','Stale','Delay','Probe','Permanent') } |
+        Select-Object -ExpandProperty IPAddress -First 1
+    } | Where-Object { $_ } | Select-Object -Unique)
+  }
   $switches = @($adapters | ForEach-Object { $_.SwitchName } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
   $disks = @(Get-VMHardDiskDrive -VMName $vm.Name -ErrorAction SilentlyContinue | ForEach-Object { $_.Path })
   $diskSizeBytes = [uint64]0
@@ -285,6 +295,16 @@ if (-not $vm) {{
 }}
 $adapters = @(Get-VMNetworkAdapter -VMName $vm.Name -ErrorAction SilentlyContinue)
 $ips = @($adapters.IPAddresses | Where-Object {{ $_ -match '^\d+\.\d+\.\d+\.\d+$' }})
+$ips = @($ips | Where-Object {{ $_ -match '^\d+\.\d+\.\d+\.\d+$' }} | Select-Object -Unique)
+if ($ips.Count -eq 0) {{
+  $ips = @($adapters | ForEach-Object {{
+    $m = $_.MacAddress; if ($m.Length -ne 12) {{ return }}
+    $fmt = ($m -replace '(.{{2}})(.{{2}})(.{{2}})(.{{2}})(.{{2}})(.{{2}})', '$1-$2-$3-$4-$5-$6').ToUpper()
+    Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+      Where-Object {{ $_.LinkLayerAddress -ieq $fmt -and $_.IPAddress -notlike '169.254.*' -and $_.State -in @('Reachable','Stale','Delay','Probe','Permanent') }} |
+      Select-Object -ExpandProperty IPAddress -First 1
+  }} | Where-Object {{ $_ }} | Select-Object -Unique)
+}}
 $switches = @($adapters | ForEach-Object {{ $_.SwitchName }} | Where-Object {{ -not [string]::IsNullOrWhiteSpace($_) }} | Sort-Object -Unique)
 $disks = @(Get-VMHardDiskDrive -VMName $vm.Name -ErrorAction SilentlyContinue | ForEach-Object {{ $_.Path }})
 $diskSizeBytes = [uint64]0
@@ -323,7 +343,7 @@ foreach ($diskPath in $disks) {{
             format!(
                 r#"
 $ErrorActionPreference = 'Stop'
-$report = Compare-VM -Path {vmcx} -Copy -VirtualMachinePath {dest} -VhdDestinationPath (Join-Path {dest} 'Virtual Hard Disks') -ErrorAction Stop
+$report = Compare-VM -Path {vmcx} -Copy -GenerateNewId -VirtualMachinePath {dest} -VhdDestinationPath (Join-Path {dest} 'Virtual Hard Disks') -ErrorAction Stop
 $messages = @($report.Incompatibilities | ForEach-Object {{ $_.Message }})
 [pscustomobject]@{{
   compatible = $messages.Count -eq 0
@@ -345,7 +365,7 @@ $messages = @($report.Incompatibilities | ForEach-Object {{ $_.Message }})
             format!(
                 r#"
 $ErrorActionPreference = 'Stop'
-$report = Compare-VM -Path {vmcx} -Copy -VirtualMachinePath {dest} -VhdDestinationPath (Join-Path {dest} 'Virtual Hard Disks') -ErrorAction Stop
+$report = Compare-VM -Path {vmcx} -Copy -GenerateNewId -VirtualMachinePath {dest} -VhdDestinationPath (Join-Path {dest} 'Virtual Hard Disks') -ErrorAction Stop
 $vm = Import-VM -CompatibilityReport $report -ErrorAction Stop
 [pscustomobject]@{{
   name = $vm.Name
