@@ -239,6 +239,15 @@ pub fn document() -> Value {
                     "responses": { "200": { "description": "Guild directory rows" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
                 }
             },
+            "/api/database/guilds/{guildId}": {
+                "get": {
+                    "summary": "Read a controlled guild profile and member list from selected game database tables",
+                    "parameters": [
+                        { "name": "guildId", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 } }
+                    ],
+                    "responses": { "200": { "description": "Guild profile and member summaries" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/Error" } }
+                }
+            },
             "/api/database/players/{accountId}/tags": {
                 "post": {
                     "summary": "Add a controlled player tag",

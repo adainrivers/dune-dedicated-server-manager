@@ -76,6 +76,37 @@ pub struct DatabaseGuildsResponse {
     pub rows: Vec<DatabaseGuildSummary>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct DatabaseGuildMember {
+    pub account_id: Option<i64>,
+    pub player_state_id: i64,
+    pub character_name: Option<String>,
+    pub role_id: i16,
+    pub online_status: Option<String>,
+    pub life_state: Option<String>,
+    pub last_login_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct DatabaseGuildProfile {
+    pub guild_id: i64,
+    pub guild_name: String,
+    pub guild_description: Option<String>,
+    pub guild_faction: Option<i16>,
+    pub member_count: i64,
+    pub online_members: i64,
+    pub members: Vec<DatabaseGuildMember>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseGuildProfileResponse {
+    pub namespace: String,
+    pub profile: DatabaseGuildProfile,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabasePlayerTagRequest {

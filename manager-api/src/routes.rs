@@ -101,6 +101,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/database/guilds", get(database_guilds))
         .route(
+            "/api/database/guilds/:guild_id",
+            get(database_guild_profile_route),
+        )
+        .route(
             "/api/database/players/:account_id/tags",
             post(add_database_player_tag_route).delete(remove_database_player_tag_route),
         )
@@ -691,6 +695,21 @@ async fn database_guilds(
     Ok(Json(DatabaseGuildsResponse {
         namespace: state.namespace.clone(),
         rows: list_database_guilds(&state).await?,
+    }))
+}
+
+async fn database_guild_profile_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(guild_id): Path<i64>,
+) -> ApiResponse<DatabaseGuildProfileResponse> {
+    authorize(&state, &headers, None)?;
+    let profile = database_guild_profile(&state, guild_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("guild was not found"))?;
+    Ok(Json(DatabaseGuildProfileResponse {
+        namespace: state.namespace.clone(),
+        profile,
     }))
 }
 

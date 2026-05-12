@@ -176,6 +176,29 @@ export type DatabaseGuildsResponse = {
   rows: DatabaseGuildSummary[];
 };
 
+export type DatabaseGuildProfile = {
+  guildId: number;
+  guildName: string;
+  guildDescription?: string;
+  guildFaction?: number;
+  memberCount: number;
+  onlineMembers: number;
+  members: Array<{
+    accountId?: number;
+    playerStateId: number;
+    characterName?: string;
+    roleId: number;
+    onlineStatus?: string;
+    lifeState?: string;
+    lastLoginTime?: string;
+  }>;
+};
+
+export type DatabaseGuildProfileResponse = {
+  namespace: string;
+  profile: DatabaseGuildProfile;
+};
+
 export type DatabasePlayerTagsUpdateResponse = {
   namespace: string;
   result: {

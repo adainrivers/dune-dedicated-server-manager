@@ -9,9 +9,9 @@ use tokio::io::AsyncReadExt;
 use crate::{
     errors::ApiError,
     models::{
-        DatabaseGuildSummary, DatabasePlayerProfile, DatabasePlayerStatistics,
-        DatabasePlayerSummary, DatabasePlayerTagRequest, DatabasePlayerTagsUpdate,
-        DatabaseWorldPartition, DatabaseWorldPartitionUpdateRequest,
+        DatabaseGuildProfile, DatabaseGuildSummary, DatabasePlayerProfile,
+        DatabasePlayerStatistics, DatabasePlayerSummary, DatabasePlayerTagRequest,
+        DatabasePlayerTagsUpdate, DatabaseWorldPartition, DatabaseWorldPartitionUpdateRequest,
     },
     state::AppState,
 };
@@ -42,6 +42,25 @@ pub async fn list_database_guilds(state: &AppState) -> Result<Vec<DatabaseGuildS
 
     serde_json::from_str(stdout.trim())
         .with_context(|| "failed to parse database guild directory output".to_string())
+}
+
+pub async fn database_guild_profile(
+    state: &AppState,
+    guild_id: i64,
+) -> Result<Option<DatabaseGuildProfile>, ApiError> {
+    if guild_id <= 0 {
+        return Err(ApiError::bad_request("guild id must be positive"));
+    }
+    let query = guild_profile_query(guild_id);
+    let stdout = exec_database_psql_json(state, &query).await?;
+    let value: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|_| ApiError::bad_gateway("failed to parse guild profile"))?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    let profile = serde_json::from_value(value)
+        .map_err(|_| ApiError::bad_gateway("failed to parse guild profile fields"))?;
+    Ok(Some(profile))
 }
 
 pub async fn database_player_statistics(state: &AppState) -> Result<DatabasePlayerStatistics> {
@@ -242,6 +261,12 @@ fn player_profile_query(account_id: i64) -> String {
     )
 }
 
+fn guild_profile_query(guild_id: i64) -> String {
+    format!(
+        "select coalesce((select json_build_object('guild_id', g.guild_id, 'guild_name', g.guild_name, 'guild_description', g.guild_description, 'guild_faction', g.guild_faction, 'member_count', (select count(*) from dune.guild_members where guild_id = g.guild_id), 'online_members', (select count(*) from dune.guild_members gm join dune.player_state ps on ps.player_state_id = gm.player_id where gm.guild_id = g.guild_id and ps.online_status::text = 'Online'), 'members', coalesce(members.rows, '[]'::json)) from dune.guilds g left join lateral (select json_agg(m order by m.role_id, m.character_name nulls last, m.player_state_id) as rows from (select ps.account_id, gm.player_id as player_state_id, ps.character_name, gm.role_id, ps.online_status::text as online_status, ps.life_state::text as life_state, ps.last_login_time::text as last_login_time from dune.guild_members gm left join dune.player_state ps on ps.player_state_id = gm.player_id where gm.guild_id = g.guild_id order by gm.role_id, ps.character_name nulls last limit 500) m) members on true where g.guild_id = {guild_id} limit 1), 'null'::json)"
+    )
+}
+
 fn parse_player_tags_update(stdout: &str) -> Result<DatabasePlayerTagsUpdate, ApiError> {
     let value: serde_json::Value = serde_json::from_str(stdout.trim())
         .map_err(|_| ApiError::bad_gateway("failed to parse player tags update"))?;
@@ -299,6 +324,17 @@ mod tests {
         assert_eq!(rows[0].guild_id, 7);
         assert_eq!(rows[0].guild_name, "Atreides");
         assert_eq!(rows[0].member_count, 12);
+    }
+
+    #[test]
+    fn parses_database_guild_profile() {
+        let json = r#"{"guild_id":7,"guild_name":"Atreides","guild_description":"Desert power","guild_faction":1,"member_count":2,"online_members":1,"members":[{"account_id":42,"player_state_id":11,"character_name":"Siona","role_id":1,"online_status":"Online","life_state":"Alive","last_login_time":"2026-05-12 10:00:00+00"}]}"#;
+
+        let profile: DatabaseGuildProfile = serde_json::from_str(json).unwrap();
+
+        assert_eq!(profile.guild_id, 7);
+        assert_eq!(profile.online_members, 1);
+        assert_eq!(profile.members[0].character_name.as_deref(), Some("Siona"));
     }
 
     #[test]

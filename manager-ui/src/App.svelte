@@ -6,6 +6,7 @@
     ApiError,
     api,
     type BattlegroupSummary,
+    type DatabaseGuildProfileResponse,
     type DatabaseGuildSummary,
     type DatabaseGuildsResponse,
     type DatabaseMaintenanceItem,
@@ -159,6 +160,8 @@
   let selectedPlayerProfileBusy = false;
   let databaseGuilds: DatabaseGuildsResponse | null = null;
   let databaseGuildsBusy = false;
+  let selectedGuildProfile: DatabaseGuildProfileResponse | null = null;
+  let selectedGuildProfileBusy = false;
   let playerTagDrafts: Record<number, string> = {};
   let playerTagBusy: Record<number, boolean> = {};
   let playerStatistics: DatabasePlayerStatisticsResponse | null = null;
@@ -644,6 +647,18 @@
       if (showError) error = message(err);
     } finally {
       databaseGuildsBusy = false;
+    }
+  }
+
+  async function loadGuildProfile(guildId: number) {
+    selectedGuildProfileBusy = true;
+    error = "";
+    try {
+      selectedGuildProfile = await api<DatabaseGuildProfileResponse>(`/api/database/guilds/${guildId}`);
+    } catch (err) {
+      error = message(err);
+    } finally {
+      selectedGuildProfileBusy = false;
     }
   }
 
@@ -2903,7 +2918,12 @@
                     <strong>{guild.guildName}</strong>
                     <span>Guild #{guild.guildId}{guild.guildFaction !== undefined && guild.guildFaction !== null ? ` · faction ${guild.guildFaction}` : ""}</span>
                   </div>
-                  <b>{guild.memberCount} member{guild.memberCount === 1 ? "" : "s"}</b>
+                  <div class="guild-actions">
+                    <b>{guild.memberCount} member{guild.memberCount === 1 ? "" : "s"}</b>
+                    <button class="inline" disabled={selectedGuildProfileBusy} on:click={() => loadGuildProfile(guild.guildId)}>
+                      {selectedGuildProfileBusy && selectedGuildProfile?.profile.guildId === guild.guildId ? "Opening..." : "Profile"}
+                    </button>
+                  </div>
                   {#if guild.guildDescription}<p>{guild.guildDescription}</p>{/if}
                 </article>
               {/each}
@@ -2916,6 +2936,39 @@
             <p class="muted">Loading guilds from a controlled database query.</p>
           {/if}
         </section>
+        {#if selectedGuildProfile}
+          <section class="panel guild-profile-panel">
+            <div class="split-heading">
+              <div>
+                <p class="eyebrow">Guild profile</p>
+                <h2>{selectedGuildProfile.profile.guildName}</h2>
+                <p class="muted">{selectedGuildProfile.profile.guildDescription || "No guild description."}</p>
+              </div>
+              <button class="inline" on:click={() => (selectedGuildProfile = null)}>Close</button>
+            </div>
+            <div class="stats-strip guild-stats">
+              <div><span>Guild ID</span><b>{selectedGuildProfile.profile.guildId}</b></div>
+              <div><span>Faction</span><b>{selectedGuildProfile.profile.guildFaction ?? "Unknown"}</b></div>
+              <div><span>Members</span><b>{selectedGuildProfile.profile.memberCount}</b></div>
+              <div><span>Online</span><b>{selectedGuildProfile.profile.onlineMembers}</b></div>
+            </div>
+            <div class="guild-member-list">
+              {#each selectedGuildProfile.profile.members as member}
+                <article>
+                  <div>
+                    <strong>{member.characterName || `Player state ${member.playerStateId}`}</strong>
+                    <span>{member.accountId ? `Account ${member.accountId}` : "No account row"} · role {member.roleId}</span>
+                  </div>
+                  <div>
+                    <b class:good={member.onlineStatus === "Online"}>{member.onlineStatus || "Unknown"}</b>
+                    <span>{member.lifeState || "No life state"} · {formatBackupTime(member.lastLoginTime)}</span>
+                  </div>
+                </article>
+              {/each}
+              {#if !selectedGuildProfile.profile.members.length}<p class="muted">No guild members found.</p>{/if}
+            </div>
+          </section>
+        {/if}
         <section class="panel player-activity-panel">
           <div class="split-heading">
             <div>

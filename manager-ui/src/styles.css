@@ -1807,10 +1807,56 @@ header,
   white-space: nowrap;
 }
 
+.guild-actions {
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
+}
+
 .guild-directory p {
   grid-column: 1 / -1;
   margin: 0;
   color: #d9d1c4;
+}
+
+.guild-profile-panel {
+  border-color: rgba(214, 187, 133, 0.22);
+}
+
+.guild-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.guild-member-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.guild-member-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.75rem;
+  border: 1px solid rgba(214, 187, 133, 0.13);
+  border-radius: 8px;
+  background: rgba(8, 7, 6, 0.3);
+}
+
+.guild-member-list strong,
+.guild-member-list span,
+.guild-member-list b {
+  display: block;
+}
+
+.guild-member-list span {
+  color: #b9aa91;
+  font-size: 0.78rem;
+}
+
+.guild-member-list b {
+  color: #ffe3a9;
+  text-align: right;
 }
 
 .stats-strip {
@@ -2002,6 +2048,7 @@ header,
   .profile-grid,
   .profile-columns,
   .guild-directory article,
+  .guild-member-list article,
   .player-table article {
     grid-template-columns: 1fr;
   }
@@ -2020,5 +2067,13 @@ header,
 
   .player-directory-state {
     justify-items: start;
+  }
+
+  .guild-actions {
+    justify-items: start;
+  }
+
+  .guild-member-list b {
+    text-align: left;
   }
 }
