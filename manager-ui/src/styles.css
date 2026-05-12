@@ -743,6 +743,56 @@ header,
   white-space: nowrap;
 }
 
+.storage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.storage-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(214, 187, 133, 0.14);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(207, 158, 84, 0.08), rgba(255, 255, 255, 0.018)),
+    rgba(8, 7, 6, 0.34);
+}
+
+.storage-card strong,
+.storage-card span,
+.storage-card b {
+  display: block;
+}
+
+.storage-card span {
+  color: #b9aa91;
+  font-size: 0.8rem;
+}
+
+.storage-meter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.storage-detail {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.35rem 0.65rem;
+}
+
+.storage-detail b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .metric-card,
 .panel {
   padding: 1rem;
@@ -854,7 +904,8 @@ header,
   .setting-grid,
   .workload-grid,
   .workload-card,
-  .event-list article {
+  .event-list article,
+  .storage-grid {
     grid-template-columns: 1fr;
   }
 

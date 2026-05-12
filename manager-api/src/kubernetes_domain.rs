@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use k8s_openapi::{
-    api::core::v1::{Container, Event, Pod, Service},
+    api::core::v1::{Container, Event, PersistentVolumeClaim, Pod, Service},
     apimachinery::pkg::util::intstr::IntOrString,
 };
 use kube::{
@@ -14,9 +14,9 @@ use crate::{
     config_files_domain::{read_deep_desert_pvp_partition_ids, write_deep_desert_pvp_settings},
     errors::ApiError,
     models::{
-        BattleGroupDetail, BattleGroupSummary, ContainerResourceSummary, EventSummary, PodSummary,
-        ServerSetSummary, ServicePortSummary, ServiceSummary, WorldLayout,
-        WorldLayoutUpdateRequest, WorldLayoutUpdateResponse,
+        BattleGroupDetail, BattleGroupSummary, ContainerResourceSummary, EventSummary,
+        PersistentVolumeClaimSummary, PodSummary, ServerSetSummary, ServicePortSummary,
+        ServiceSummary, WorldLayout, WorldLayoutUpdateRequest, WorldLayoutUpdateResponse,
     },
     state::AppState,
     validation::{validate_kube_name, validate_namespace},
@@ -87,6 +87,25 @@ pub async fn list_events(state: &AppState, limit: usize) -> Result<Vec<EventSumm
     Ok(events)
 }
 
+pub async fn list_persistent_volume_claims(
+    state: &AppState,
+) -> Result<Vec<PersistentVolumeClaimSummary>> {
+    let claims: Api<PersistentVolumeClaim> =
+        Api::namespaced(state.client.clone(), &state.namespace);
+    let list = claims
+        .list(&ListParams::default())
+        .await
+        .context("failed to list persistent volume claims")?;
+
+    let mut claims = list
+        .items
+        .into_iter()
+        .map(persistent_volume_claim_summary)
+        .collect::<Vec<_>>();
+    claims.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(claims)
+}
+
 fn pod_summary(pod: Pod) -> PodSummary {
     let status = pod.status.unwrap_or_default();
     let spec = pod.spec;
@@ -117,6 +136,44 @@ fn pod_summary(pod: Pod) -> PodSummary {
         container_resources,
         node_name: spec.and_then(|spec| spec.node_name),
         created_at: pod
+            .metadata
+            .creation_timestamp
+            .map(|time| time.0.to_rfc3339()),
+    }
+}
+
+fn persistent_volume_claim_summary(claim: PersistentVolumeClaim) -> PersistentVolumeClaimSummary {
+    let spec = claim.spec;
+    let status = claim.status;
+    let requested_storage = spec
+        .as_ref()
+        .and_then(|spec| spec.resources.as_ref())
+        .and_then(|resources| resources.requests.as_ref())
+        .and_then(|requests| requests.get("storage"))
+        .map(|value| value.0.clone());
+    let capacity_storage = status
+        .as_ref()
+        .and_then(|status| status.capacity.as_ref())
+        .and_then(|capacity| capacity.get("storage"))
+        .map(|value| value.0.clone());
+
+    PersistentVolumeClaimSummary {
+        name: claim.metadata.name.unwrap_or_default(),
+        phase: status
+            .as_ref()
+            .and_then(|status| status.phase.clone())
+            .unwrap_or_default(),
+        requested_storage,
+        capacity_storage,
+        storage_class: spec
+            .as_ref()
+            .and_then(|spec| spec.storage_class_name.clone()),
+        volume_name: spec.as_ref().and_then(|spec| spec.volume_name.clone()),
+        access_modes: spec
+            .as_ref()
+            .and_then(|spec| spec.access_modes.clone())
+            .unwrap_or_default(),
+        created_at: claim
             .metadata
             .creation_timestamp
             .map(|time| time.0.to_rfc3339()),
@@ -741,7 +798,11 @@ fn string_at_paths(data: &Value, paths: &[&[&str]]) -> String {
 mod tests {
     use super::*;
     use k8s_openapi::{
-        api::core::v1::{ContainerStatus, PodSpec, PodStatus, ResourceRequirements},
+        api::core::v1::{
+            ContainerStatus, PersistentVolumeClaim, PersistentVolumeClaimSpec,
+            PersistentVolumeClaimStatus, PodSpec, PodStatus, ResourceRequirements,
+            VolumeResourceRequirements,
+        },
         apimachinery::pkg::{api::resource::Quantity, apis::meta::v1::ObjectMeta},
     };
     use std::collections::BTreeMap;
@@ -836,6 +897,44 @@ mod tests {
             summary.container_resources[0].cpu_limit.as_deref(),
             Some("500m")
         );
+    }
+
+    #[test]
+    fn summarizes_persistent_volume_claims() {
+        let mut requests = BTreeMap::new();
+        requests.insert("storage".to_string(), Quantity("100Gi".to_string()));
+        let mut capacity = BTreeMap::new();
+        capacity.insert("storage".to_string(), Quantity("100Gi".to_string()));
+        let claim = PersistentVolumeClaim {
+            metadata: ObjectMeta {
+                name: Some("database-data".to_string()),
+                ..ObjectMeta::default()
+            },
+            spec: Some(PersistentVolumeClaimSpec {
+                access_modes: Some(vec!["ReadWriteOnce".to_string()]),
+                resources: Some(VolumeResourceRequirements {
+                    requests: Some(requests),
+                    ..VolumeResourceRequirements::default()
+                }),
+                storage_class_name: Some("local-path".to_string()),
+                volume_name: Some("pvc-volume".to_string()),
+                ..PersistentVolumeClaimSpec::default()
+            }),
+            status: Some(PersistentVolumeClaimStatus {
+                capacity: Some(capacity),
+                phase: Some("Bound".to_string()),
+                ..PersistentVolumeClaimStatus::default()
+            }),
+        };
+
+        let summary = persistent_volume_claim_summary(claim);
+
+        assert_eq!(summary.name, "database-data");
+        assert_eq!(summary.phase, "Bound");
+        assert_eq!(summary.requested_storage.as_deref(), Some("100Gi"));
+        assert_eq!(summary.capacity_storage.as_deref(), Some("100Gi"));
+        assert_eq!(summary.storage_class.as_deref(), Some("local-path"));
+        assert_eq!(summary.access_modes, vec!["ReadWriteOnce"]);
     }
 
     #[test]

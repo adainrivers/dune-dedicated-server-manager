@@ -84,6 +84,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/services", get(services))
         .route("/api/workloads", get(workloads))
         .route("/api/events", get(events))
+        .route("/api/storage", get(storage))
         .route("/api/logs", get(logs))
         .route("/api/logs/export", get(logs_export))
         .route("/api/logs/stream", get(logs_stream))
@@ -579,6 +580,17 @@ async fn events(
     Ok(Json(EventsResponse {
         namespace: state.namespace.clone(),
         events: list_events(&state, limit).await?,
+    }))
+}
+
+async fn storage(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> ApiResponse<StorageResponse> {
+    authorize(&state, &headers, None)?;
+    Ok(Json(StorageResponse {
+        namespace: state.namespace.clone(),
+        claims: list_persistent_volume_claims(&state).await?,
     }))
 }
 

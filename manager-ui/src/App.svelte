@@ -17,7 +17,9 @@
     type ManagerLogResponse,
     type ManagerSelf,
     type Overview,
+    type PersistentVolumeClaimSummary,
     type Session,
+    type StorageResponse,
     type TelemetryEnvelope,
     type TelemetrySnapshot,
     type UserSettingsBackupCreateResponse,
@@ -35,6 +37,7 @@
     | "dashboard"
     | "battlegroup"
     | "workloads"
+    | "storage"
     | "layout"
     | "config"
     | "director"
@@ -97,6 +100,9 @@
   let workloadFilter = "";
   let events: EventSummary[] = [];
   let eventsBusy = false;
+  let storageClaims: PersistentVolumeClaimSummary[] = [];
+  let storageBusy = false;
+  let storageFilter = "";
   let managerSelf: ManagerSelf | null = null;
   let managerLogs: ManagerLogResponse | null = null;
   let managerBusy = "";
@@ -111,6 +117,7 @@
   $: visiblePods = filterPods(pods, workloadFilter);
   $: visibleServices = filterServices(services, workloadFilter);
   $: visibleEvents = filterEvents(events, workloadFilter);
+  $: visibleStorageClaims = filterStorageClaims(storageClaims, storageFilter);
   $: layoutMemory = layout ? estimateLayoutMemory(layout) : null;
   $: layoutDeepDesertMode = layout
     ? layout.deepDesertPvpInstances > 0
@@ -471,6 +478,19 @@
     }
   }
 
+  async function loadStorage() {
+    storageBusy = true;
+    error = "";
+    try {
+      const result = await api<StorageResponse>("/api/storage");
+      storageClaims = result.claims;
+    } catch (err) {
+      error = message(err);
+    } finally {
+      storageBusy = false;
+    }
+  }
+
   async function loadSettingsFile(file = selectedSettingsFile) {
     error = "";
     settingsNotice = "";
@@ -691,6 +711,17 @@
     if (!text) return items;
     return items.filter((event) =>
       [event.eventType, event.reason, event.message, event.involvedKind, event.involvedName]
+        .join(" ")
+        .toLowerCase()
+        .includes(text),
+    );
+  }
+
+  function filterStorageClaims(items: PersistentVolumeClaimSummary[], filter: string) {
+    const text = filter.trim().toLowerCase();
+    if (!text) return items;
+    return items.filter((claim) =>
+      [claim.name, claim.phase, claim.requestedStorage, claim.capacityStorage, claim.storageClass, claim.volumeName]
         .join(" ")
         .toLowerCase()
         .includes(text),
@@ -969,7 +1000,7 @@
         <strong>Dune Manager</strong>
         <span>{session.namespace}</span>
       </div>
-      {#each ["dashboard", "battlegroup", "workloads", "layout", "config", "director", "players", "logs", "settings"] as item}
+      {#each ["dashboard", "battlegroup", "workloads", "storage", "layout", "config", "director", "players", "logs", "settings"] as item}
         <button class:active={page === item} on:click={() => (page = item as Page)}>{item}</button>
       {/each}
       <button class="ghost" on:click={logout}>Sign out</button>
@@ -1092,6 +1123,44 @@
               <p class="muted">Load events to inspect recent cluster activity. The workload filter also applies here.</p>
             {/if}
           </section>
+        </section>
+      {:else if page === "storage"}
+        <section class="panel form">
+          <div class="split-heading">
+            <div>
+              <h2>Storage</h2>
+              <p class="muted">Inspect persistent volume claims used by database, queues, and runtime services.</p>
+            </div>
+            <div class="actions">
+              <input bind:value={storageFilter} placeholder="Filter claims" />
+              <button disabled={storageBusy} on:click={loadStorage}>
+                {storageBusy ? "Loading..." : storageClaims.length ? "Refresh" : "Load storage"}
+              </button>
+            </div>
+          </div>
+          {#if visibleStorageClaims.length}
+            <div class="storage-grid">
+              {#each visibleStorageClaims as claim}
+                <article class="storage-card">
+                  <div>
+                    <strong>{claim.name}</strong>
+                    <span>{claim.storageClass || "default storage"} · {claim.accessModes.join(", ") || "no access mode"}</span>
+                  </div>
+                  <div class="storage-meter">
+                    <b class:good={claim.phase === "Bound"}>{claim.phase || "Unknown"}</b>
+                    <span>{claim.capacityStorage || claim.requestedStorage || "unknown size"}</span>
+                  </div>
+                  <div class="storage-detail">
+                    <span>Requested</span><b>{claim.requestedStorage || "unknown"}</b>
+                    <span>Volume</span><b>{claim.volumeName || "not bound"}</b>
+                    <span>Created</span><b>{formatBackupTime(claim.createdAt)}</b>
+                  </div>
+                </article>
+              {/each}
+            </div>
+          {:else}
+            <p class="muted">Load storage to inspect PVC capacity and binding state. The filter applies after loading.</p>
+          {/if}
         </section>
       {:else if page === "battlegroup"}
         <section class="panel">

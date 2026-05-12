@@ -73,6 +73,22 @@ export type EventsResponse = {
   events: EventSummary[];
 };
 
+export type PersistentVolumeClaimSummary = {
+  name: string;
+  phase: string;
+  requestedStorage?: string;
+  capacityStorage?: string;
+  storageClass?: string;
+  volumeName?: string;
+  accessModes: string[];
+  createdAt?: string;
+};
+
+export type StorageResponse = {
+  namespace: string;
+  claims: PersistentVolumeClaimSummary[];
+};
+
 export type PlayerSummary = {
   active: number;
   online: number;

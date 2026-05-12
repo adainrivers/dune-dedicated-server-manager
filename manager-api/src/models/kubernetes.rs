@@ -71,3 +71,23 @@ pub struct EventsResponse {
     pub namespace: String,
     pub events: Vec<EventSummary>,
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistentVolumeClaimSummary {
+    pub name: String,
+    pub phase: String,
+    pub requested_storage: Option<String>,
+    pub capacity_storage: Option<String>,
+    pub storage_class: Option<String>,
+    pub volume_name: Option<String>,
+    pub access_modes: Vec<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageResponse {
+    pub namespace: String,
+    pub claims: Vec<PersistentVolumeClaimSummary>,
+}

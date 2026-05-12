@@ -182,6 +182,12 @@ pub fn document() -> Value {
                     "responses": { "200": { "description": "Recent event timeline" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
                 }
             },
+            "/api/storage": {
+                "get": {
+                    "summary": "List persistent volume claims",
+                    "responses": { "200": { "description": "Persistent volume claim summaries" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+                }
+            },
             "/api/logs": {
                 "get": {
                     "summary": "Read pod logs",
