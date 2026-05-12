@@ -339,7 +339,7 @@ const defaultForm: SetupForm = {
   tokenSource: "",
   survivalInstances: "1",
   includeSocial: true,
-  deepDesertPveInstances: "1",
+  deepDesertPveInstances: "0",
   deepDesertPvpInstances: "0",
   deepDesertWarmServers: "0",
   remoteHost: "",
