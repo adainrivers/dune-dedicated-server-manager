@@ -82,7 +82,7 @@
     { page: "director", label: "Director Rules" },
     { page: "database", label: "Backups" },
     { page: "battlegroup", label: "Server Control" },
-    { page: "workloads", label: "Workloads" },
+    { page: "workloads", label: "Server Health" },
     { page: "storage", label: "Storage" },
     { page: "logs", label: "Logs" },
     { page: "settings", label: "Manager" },
@@ -261,6 +261,9 @@
     }
     if (nextPage === "layout" && !databaseWorldPartitions && !databaseTablesBusy) {
       void loadDatabaseWorldPartitions();
+    }
+    if (nextPage === "workloads" && !events.length && !eventsBusy) {
+      void loadEvents();
     }
     if (nextPage === "director" && !directorFlsDraft && !directorTransferDraft && !directorAutoLoading) {
       directorAutoLoading = true;
@@ -1688,14 +1691,37 @@
         <section class="panel form">
           <div class="split-heading">
             <div>
-              <h2>Workloads</h2>
-              <p class="muted">Inspect Kubernetes pods and services in the managed namespace.</p>
+              <p class="eyebrow">Runtime diagnostics</p>
+              <h2>Server Health</h2>
+              <p class="muted">Check game services, restart pressure, exposed ports, and recent warning events.</p>
             </div>
-            <input bind:value={workloadFilter} placeholder="Filter workloads" />
+            <input bind:value={workloadFilter} placeholder="Filter service, pod, container, or event" />
+          </div>
+          <div class="health-strip">
+            <article class:good={serverHealth.tone === "good"} class:warning={serverHealth.tone === "warn"} class:danger-state={serverHealth.tone === "danger"}>
+              <span>Overall</span>
+              <strong>{serverHealth.label}</strong>
+              <p>{serverHealth.summary}</p>
+            </article>
+            <article>
+              <span>Game services</span>
+              <strong>{runningPods}/{pods.length} ready</strong>
+              <p>{notReadyPods.length ? `${notReadyPods.length} needs attention.` : "All tracked workloads are ready."}</p>
+            </article>
+            <article>
+              <span>Restarts</span>
+              <strong>{pods.reduce((total, pod) => total + pod.restarts, 0)}</strong>
+              <p>Container restarts reported by the runtime.</p>
+            </article>
+            <article>
+              <span>Warnings</span>
+              <strong>{events.filter((event) => event.eventType === "Warning").length}</strong>
+              <p>{events.length ? "Recent cluster events loaded." : "Events are loading on open."}</p>
+            </article>
           </div>
           <div class="workload-grid">
             <section>
-              <h3>Pods</h3>
+              <h3>Runtime services</h3>
               <div class="workload-list">
                 {#each visiblePods as pod}
                   <article class="workload-card">
@@ -1715,7 +1741,7 @@
               </div>
             </section>
             <section>
-              <h3>Services</h3>
+              <h3>Network endpoints</h3>
               <div class="workload-list">
                 {#each visibleServices as service}
                   <article class="workload-card">
@@ -1735,7 +1761,7 @@
             <div class="editor-title">
               <div>
                 <h3>Cluster Events</h3>
-                <p class="muted">Recent Kubernetes scheduling, readiness, image, and warning events for this server.</p>
+                <p class="muted">Recent scheduling, readiness, image, and warning events for this server.</p>
               </div>
               <button disabled={eventsBusy} on:click={loadEvents}>
                 {eventsBusy ? "Loading..." : events.length ? "Refresh events" : "Load events"}
@@ -1755,7 +1781,7 @@
                 {/each}
               </div>
             {:else}
-              <p class="muted">Load events to inspect recent cluster activity. The workload filter also applies here.</p>
+              <p class="muted">Events load automatically when this page opens. The health filter also applies here.</p>
             {/if}
           </section>
         </section>

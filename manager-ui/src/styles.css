@@ -1214,6 +1214,54 @@ header,
   white-space: nowrap;
 }
 
+.health-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.health-strip article {
+  min-height: 7.2rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(214, 187, 133, 0.13);
+  border-radius: 8px;
+  background: rgba(8, 7, 6, 0.3);
+}
+
+.health-strip span,
+.health-strip strong {
+  display: block;
+}
+
+.health-strip span {
+  color: #b9aa91;
+  font-size: 0.78rem;
+}
+
+.health-strip strong {
+  margin-top: 0.2rem;
+  color: #f2d492;
+  font-size: 1.15rem;
+}
+
+.health-strip p {
+  margin: 0.55rem 0 0;
+  color: #d9d1c4;
+  font-size: 0.86rem;
+}
+
+.health-strip article.good {
+  background: rgba(44, 92, 57, 0.2);
+}
+
+.health-strip article.warning {
+  background: rgba(105, 78, 29, 0.28);
+}
+
+.health-strip article.danger-state {
+  background: rgba(97, 32, 26, 0.32);
+}
+
 .backup-readiness {
   display: grid;
   grid-template-columns: minmax(12rem, auto) minmax(0, 1fr);
@@ -1670,6 +1718,7 @@ header,
   .storage-grid,
   .database-ribbon,
   .backup-readiness,
+  .health-strip,
   .database-card,
   .partition-list article,
   .partition-controls,
