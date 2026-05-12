@@ -2659,8 +2659,8 @@
                 <p class="muted">Load rules to edit FLS report settings.</p>
               {/if}
               <details class="advanced-ini">
-                <summary>Advanced raw JSON</summary>
-                <textarea bind:value={directorFlsDraft} spellcheck="false" placeholder="Load config to edit JSON"></textarea>
+                <summary>Diagnostic JSON preview</summary>
+                <textarea value={directorFlsDraft} spellcheck="false" readonly placeholder="Load config to inspect JSON"></textarea>
               </details>
             </section>
             <section>
@@ -2697,8 +2697,8 @@
                 <p class="muted">Load rules to edit character transfer settings.</p>
               {/if}
               <details class="advanced-ini">
-                <summary>Advanced raw JSON</summary>
-                <textarea bind:value={directorTransferDraft} spellcheck="false" placeholder="Load config to edit JSON"></textarea>
+                <summary>Diagnostic JSON preview</summary>
+                <textarea value={directorTransferDraft} spellcheck="false" readonly placeholder="Load config to inspect JSON"></textarea>
               </details>
             </section>
           </div>
@@ -2753,8 +2753,8 @@
                 <p class="muted">This map override payload has no primitive fields to edit.</p>
               {/if}
               <details class="advanced-ini">
-                <summary>Advanced raw JSON</summary>
-                <textarea bind:value={directorMapDraft} spellcheck="false" placeholder="Load a map to edit override JSON"></textarea>
+                <summary>Diagnostic JSON preview</summary>
+                <textarea value={directorMapDraft} spellcheck="false" readonly placeholder="Load a map to inspect override JSON"></textarea>
               </details>
               <details>
                 <summary>Effective config</summary>
