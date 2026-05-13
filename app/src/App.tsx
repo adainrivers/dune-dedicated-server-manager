@@ -58,6 +58,8 @@ type PlayerIpMode = "local" | "external";
 type SetupTarget = "hyperv" | "ubuntu";
 type RemoteServerKind = "ubuntu" | "alpine";
 
+const startupUpdateChecksEnabled = import.meta.env.VITE_ENABLE_STARTUP_UPDATE_CHECK === "true";
+
 type NetworkAdapterCandidate = {
   name: string;
   interfaceDescription: string;
@@ -511,7 +513,7 @@ export function App() {
     setUpdateProgress(null);
     appendInitRow(log.info("updates", "Checking for app updates."));
     try {
-      const nextUpdate = await check();
+      const nextUpdate = await check({ timeout: 15_000 });
       setAvailableUpdate(nextUpdate);
       if (nextUpdate) {
         setUpdateStatus("available");
@@ -521,14 +523,14 @@ export function App() {
             `Update ${nextUpdate.version} is available; current version is ${nextUpdate.currentVersion}.`,
           ),
         );
-        if (source === "startup") setUpdateDialogOpen(true);
+        setUpdateDialogOpen(true);
       } else {
         setUpdateStatus("current");
         appendInitRow(log.info("updates", "The app is up to date."));
       }
     } catch (err) {
       setUpdateStatus("failed");
-      appendInitRow(log.warn("updates", errorMessage(err)));
+      appendInitRow(log.warn("updates", `Update check failed: ${errorMessage(err)}`));
     } finally {
       updateCheckInFlight.current = false;
     }
@@ -541,24 +543,27 @@ export function App() {
     setUpdateProgress("Preparing download...");
     appendInitRow(log.info("updates", `Installing update ${availableUpdate.version}.`));
     try {
-      await availableUpdate.downloadAndInstall((event: DownloadEvent) => {
-        if (event.event === "Started") {
-          total = event.data.contentLength ?? null;
-          downloaded = 0;
-          setUpdateProgress(total ? `Downloading 0 of ${formatBytes(total)}` : "Downloading update...");
-        }
-        if (event.event === "Progress") {
-          downloaded += event.data.chunkLength;
-          setUpdateProgress(
-            total
-              ? `Downloading ${formatBytes(downloaded)} of ${formatBytes(total)}`
-              : `Downloading ${formatBytes(downloaded)}`,
-          );
-        }
-        if (event.event === "Finished") {
-          setUpdateProgress("Installing update...");
-        }
-      });
+      await availableUpdate.downloadAndInstall(
+        (event: DownloadEvent) => {
+          if (event.event === "Started") {
+            total = event.data.contentLength ?? null;
+            downloaded = 0;
+            setUpdateProgress(total ? `Downloading 0 of ${formatBytes(total)}` : "Downloading update...");
+          }
+          if (event.event === "Progress") {
+            downloaded += event.data.chunkLength;
+            setUpdateProgress(
+              total
+                ? `Downloading ${formatBytes(downloaded)} of ${formatBytes(total)}`
+                : `Downloading ${formatBytes(downloaded)}`,
+            );
+          }
+          if (event.event === "Finished") {
+            setUpdateProgress("Installing update...");
+          }
+        },
+        { timeout: 120_000 },
+      );
       setUpdateStatus("relaunching");
       setUpdateProgress("Relaunching...");
       appendInitRow(log.info("updates", "Update installed; relaunching the app."));
@@ -1180,7 +1185,16 @@ export function App() {
   }, [form.remoteHost, form.remoteKeyPath, form.remoteUser]);
 
   useEffect(() => {
-    appendInitRow(log.debug("updates", "Automatic update checks are disabled; use the manual check in the header workflow."));
+    if (!startupUpdateChecksEnabled) {
+      appendInitRow(log.debug("updates", "Automatic update checks are disabled for this local build."));
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void checkForAppUpdate("startup");
+    }, 1_500);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -1354,6 +1368,11 @@ export function App() {
           activePage={activePage}
           onNavigate={setActivePage}
           serverCount={duneVms.length + remoteServers.length}
+          updateStatus={updateStatus}
+          update={availableUpdate}
+          updateProgress={updateProgress}
+          onCheckUpdate={() => void checkForAppUpdate("manual")}
+          onOpenUpdate={() => setUpdateDialogOpen(true)}
         />
         <Separator size="4" />
         <Box className={activePage === "servers" ? "app-main" : "app-main has-log"}>
@@ -1527,10 +1546,20 @@ function Header({
   activePage,
   onNavigate,
   serverCount,
+  updateStatus,
+  update,
+  updateProgress,
+  onCheckUpdate,
+  onOpenUpdate,
 }: {
   activePage: PageId;
   onNavigate: (page: PageId) => void;
   serverCount: number;
+  updateStatus: UpdateStatus;
+  update: Update | null;
+  updateProgress: string | null;
+  onCheckUpdate: () => void;
+  onOpenUpdate: () => void;
 }) {
   return (
     <Flex asChild align="center" justify="between" p="4">
@@ -1546,7 +1575,48 @@ function Header({
             serverCount={serverCount}
           />
         </Flex>
+        <UpdateHeaderControl
+          status={updateStatus}
+          update={update}
+          progress={updateProgress}
+          onCheck={onCheckUpdate}
+          onOpenUpdate={onOpenUpdate}
+        />
       </header>
+    </Flex>
+  );
+}
+
+function UpdateHeaderControl({
+  status,
+  update,
+  progress,
+  onCheck,
+  onOpenUpdate,
+}: {
+  status: UpdateStatus;
+  update: Update | null;
+  progress: string | null;
+  onCheck: () => void;
+  onOpenUpdate: () => void;
+}) {
+  const busy = status === "checking" || status === "installing" || status === "relaunching";
+  const hasUpdate = Boolean(update);
+  const actionLabel = hasUpdate ? "Install" : "Check for updates";
+
+  return (
+    <Flex align="center" gap="2" className="header-update">
+      <Badge color={updateTone(status)} variant="soft">
+        {updateLabel(status, update, progress)}
+      </Badge>
+      <Button
+        size="1"
+        variant={hasUpdate ? "solid" : "surface"}
+        disabled={busy}
+        onClick={hasUpdate ? onOpenUpdate : onCheck}
+      >
+        {busy ? "Working..." : actionLabel}
+      </Button>
     </Flex>
   );
 }

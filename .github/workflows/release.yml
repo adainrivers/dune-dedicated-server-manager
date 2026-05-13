@@ -57,13 +57,8 @@ jobs:
 
       - name: Prepare release config
         shell: pwsh
-        env:
-          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY || secrets.TAURI_UPDATER_PUBLIC_KEY }}
         run: |
           $version = $env:RELEASE_VERSION
-          if ([string]::IsNullOrWhiteSpace($env:TAURI_UPDATER_PUBLIC_KEY)) {
-            throw "Set TAURI_UPDATER_PUBLIC_KEY as a GitHub Actions variable or secret before releasing."
-          }
 
           Push-Location app
           npm version --no-git-tag-version --allow-same-version $version
@@ -72,8 +67,6 @@ jobs:
           $tauriConfigPath = "app/src-tauri/tauri.conf.json"
           $config = Get-Content $tauriConfigPath -Raw
           $config = $config -replace '"version":\s*"[^"]+"', ('"version": "' + $version + '"')
-          $config = $config.Replace("__TAURI_UPDATER_PUBLIC_KEY__", $env:TAURI_UPDATER_PUBLIC_KEY)
-          $config = $config.Replace("__GITHUB_REPOSITORY__", "${{ github.repository }}")
           Set-Content -Path $tauriConfigPath -Value $config -NoNewline
 
       - name: Build and publish Tauri release
@@ -82,6 +75,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VITE_ENABLE_STARTUP_UPDATE_CHECK: "true"
         with:
           projectPath: app
           tagName: ${{ env.RELEASE_TAG }}
