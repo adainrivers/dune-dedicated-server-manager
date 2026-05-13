@@ -56,6 +56,7 @@ type PageId = (typeof pages)[number]["id"];
 type NetworkMode = "static" | "dhcp";
 type PlayerIpMode = "local" | "external";
 type SetupTarget = "hyperv" | "ubuntu";
+type RemoteServerKind = "ubuntu" | "alpine";
 
 type NetworkAdapterCandidate = {
   name: string;
@@ -215,7 +216,7 @@ type GenerateSshKeyResult = {
 };
 
 type RemoteServerRecord = {
-  type: "ubuntu";
+  type: RemoteServerKind;
   id: string;
   name: string;
   host: string;
@@ -229,9 +230,9 @@ type RemoteServerRecord = {
 };
 
 type RemoteServerProfile = {
-  type: "ubuntu";
+  type: RemoteServerKind;
   host: string;
-  keyPath: string;
+  keyPath?: string;
   createdAt: string;
 };
 
@@ -287,7 +288,7 @@ type ServerTunnelStatus = {
 
 type ServerTunnelStartRequest = {
   tunnelId: string;
-  serverKind: "hyperv" | "ubuntu";
+  serverKind: "hyperv" | "ubuntu" | "alpine";
   service: TunnelService;
   host: string;
   user?: string;
@@ -302,6 +303,7 @@ type RemoteComponentRestartResult = {
 };
 
 type RemoteAttachForm = {
+  type: RemoteServerKind;
   host: string;
   keyPath: string;
 };
@@ -419,6 +421,7 @@ const maxStoredLogRows = 2500;
 const maxRenderedLogRows = 1200;
 
 const defaultRemoteAttachForm: RemoteAttachForm = {
+  type: "ubuntu",
   host: "",
   keyPath: "",
 };
@@ -672,10 +675,10 @@ export function App() {
 
   const attachRemoteServer = async () => {
     setRemoteAttachRunning(true);
-    setSetupRows((rows) => [...rows, log.info("remote.attach", "Adding remote Ubuntu server profile.")]);
+    setSetupRows((rows) => [...rows, log.info("remote.attach", "Adding remote server profile.")]);
     try {
       const record = remoteServerPlaceholder({
-        type: "ubuntu",
+        type: remoteAttachForm.type,
         host: remoteAttachForm.host.trim(),
         keyPath: remoteAttachForm.keyPath.trim(),
         createdAt: new Date().toISOString(),
@@ -692,7 +695,7 @@ export function App() {
       setRemoteAttachForm(defaultRemoteAttachForm);
       setSetupRows((rows) => [
         ...rows,
-        log.info("remote.attach", "Added remote Ubuntu server profile."),
+        log.info("remote.attach", "Added remote server profile."),
       ]);
       void refreshRemoteServerStatus(record);
     } catch (err) {
@@ -734,7 +737,7 @@ export function App() {
     setRemoteComponentLogBusy((busy) => omitPrefix(busy, `${server.id}:`));
     setRemoteComponentRestartBusy((busy) => omitPrefix(busy, `${server.id}:`));
     setRemoteServerStatusErrors((errors) => omitKey(errors, server.id));
-    setSetupRows((rows) => [...rows, log.info("remote.attach", "Forgot remote Ubuntu server profile.")]);
+    setSetupRows((rows) => [...rows, log.info("remote.attach", "Forgot remote server profile.")]);
     setRemoteServerToRemove(null);
   };
 
@@ -805,11 +808,12 @@ export function App() {
   };
 
   const detectRemoteServerDetails = async (server: RemoteServerRecord): Promise<RemoteServerRecord> => {
-    const detected = await invoke<RemoteServerRecord[]>("detect_remote_ubuntu_servers", {
-      request: {
-        host: server.host,
-        keyPath: server.keyPath,
-      },
+    const command = server.type === "alpine" ? "detect_remote_alpine_servers" : "detect_remote_ubuntu_servers";
+    const detected = await invoke<RemoteServerRecord[]>(command, {
+      request:
+        server.type === "alpine"
+          ? { host: server.host, serverType: "alpine", user: "dune" }
+          : { host: server.host, keyPath: server.keyPath, serverType: "ubuntu", user: "root" },
     });
     if (detected.length === 0) {
       throw new Error("No Dune battlegroups were detected on the remote server.");
@@ -820,7 +824,7 @@ export function App() {
   };
 
   const refreshRemoteServerStatus = async (server: RemoteServerRecord) => {
-    if (!server.host || !server.keyPath) return;
+    if (!server.host || (server.type === "ubuntu" && !server.keyPath)) return;
     setRemoteServerBusy((busy) => ({ ...busy, [server.id]: "Retrieving server information" }));
     setRemoteServerStatuses((statuses) => omitKey(statuses, server.id));
     setRemoteServerComponents((components) => omitKey(components, server.id));
@@ -992,9 +996,10 @@ export function App() {
       }
       const result = await invoke<RemoteComponentLogResult>("remote_component_log_tail", {
         request: {
+          serverType: liveServer.type,
           host: liveServer.host,
-          user: liveServer.user || "root",
-          keyPath: liveServer.keyPath,
+          user: liveServer.user || remoteServerDefaultUser(liveServer.type),
+          keyPath: liveServer.keyPath || undefined,
           namespace: liveServer.namespace,
           component: component.logKey,
           tail: 160,
@@ -1060,9 +1065,10 @@ export function App() {
       }
       const result = await invoke<RemoteComponentRestartResult>("restart_remote_component", {
         request: {
+          serverType: liveServer.type,
           host: liveServer.host,
-          user: liveServer.user || "root",
-          keyPath: liveServer.keyPath,
+          user: liveServer.user || remoteServerDefaultUser(liveServer.type),
+          keyPath: liveServer.keyPath || undefined,
           namespace: liveServer.namespace,
           component: component.logKey,
         },
@@ -1147,7 +1153,7 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     for (const server of remoteServers) {
-      if (!server.host || !server.keyPath || remoteServerBusy[server.id]) continue;
+      if (!server.host || (server.type === "ubuntu" && !server.keyPath) || remoteServerBusy[server.id]) continue;
       void refreshRemoteServerStatus(server);
     }
     return () => {
@@ -1372,6 +1378,7 @@ export function App() {
                 onAddLocalServer={() => setLocalAttachOpen(true)}
                 onAddRemoteServer={() => {
                   setRemoteAttachForm({
+                    type: "ubuntu",
                     host: form.remoteHost,
                     keyPath: form.remoteKeyPath,
                   });
@@ -1658,7 +1665,7 @@ function ServersPage({
               Add local Hyper-V server
             </Button>
             <Button type="button" variant="surface" onClick={onAddRemoteServer}>
-              Add remote Ubuntu server
+              Add remote server
             </Button>
           </Flex>
         </Flex>
@@ -1721,7 +1728,7 @@ function ServersPage({
             ) : (
               <EmptyState
                 title="No Dune servers detected"
-                body="Create a new server or add a remote Ubuntu server profile."
+                body="Create a new server or add a remote server profile."
               />
             )}
           </Flex>
@@ -2014,7 +2021,7 @@ function RemoteServerCard({
           <Flex align="center" gap="2">
             <Heading size={compact ? "3" : "4"}>{server.name}</Heading>
             <Badge color="bronze" variant="soft">
-              Ubuntu
+              {remoteServerKindLabel(server.type)}
             </Badge>
           </Flex>
           <Text as="div" size="2" color="gray">
@@ -2082,7 +2089,7 @@ function RemoteServerCard({
       <Grid columns={compact ? "2" : "5"} gap="3" mt="3">
         <Metric label="Namespace" value={server.namespace || "pending"} />
         <Metric label="BattleGroup" value={server.battlegroupName || "pending"} />
-        <Metric label="Type" value="Ubuntu over SSH" />
+        <Metric label="Type" value={server.type === "alpine" ? "Alpine VM over SSH" : "Ubuntu over SSH"} />
         <Metric label="Created" value={new Date(server.createdAt).toLocaleString()} />
       </Grid>
       {busyLabel ? (
@@ -2130,9 +2137,9 @@ function RemoteServerCard({
           serverKey={server.id}
           namespace={server.namespace}
           host={server.host}
-          serverKind="ubuntu"
-          user={server.user || "root"}
-          keyPath={server.keyPath}
+          serverKind={server.type}
+          user={server.user || remoteServerDefaultUser(server.type)}
+          keyPath={server.type === "ubuntu" ? server.keyPath : undefined}
           canStartDirectorTunnel={!!liveStatus && !liveStatus.battlegroup.stop && isDirectorReadyPhase(liveStatus.battlegroup.directorPhase)}
           canStartFileBrowserTunnel={!!liveStatus && !liveStatus.battlegroup.stop}
           tunnels={tunnels}
@@ -2193,7 +2200,7 @@ function ServerTunnelControls({
   serverKey: string;
   namespace: string;
   host: string;
-  serverKind: "hyperv" | "ubuntu";
+  serverKind: "hyperv" | "ubuntu" | "alpine";
   vmName?: string;
   user?: string;
   keyPath?: string;
@@ -3406,12 +3413,12 @@ function remoteServerPlaceholder(
   phase = "Retrieving",
 ): RemoteServerRecord {
   return {
-    type: "ubuntu",
-    id: remoteServerId(profile.host, profile.keyPath),
-    name: name || profile.host || "Remote Ubuntu Server",
+    type: profile.type,
+    id: remoteServerId(profile.type, profile.host, profile.keyPath || ""),
+    name: name || profile.host || remoteServerKindLabel(profile.type),
     host: profile.host,
-    user: "root",
-    keyPath: profile.keyPath,
+    user: remoteServerDefaultUser(profile.type),
+    keyPath: profile.keyPath || "",
     namespace: "",
     battlegroupName: "",
     worldUniqueName: "",
@@ -3423,24 +3430,35 @@ function remoteServerPlaceholder(
 function remoteServerFromDetected(existing: RemoteServerRecord, detected: RemoteServerRecord): RemoteServerRecord {
   return {
     ...detected,
-    type: "ubuntu",
+    type: existing.type,
     id: existing.id,
     host: existing.host,
     keyPath: existing.keyPath,
-    user: "root",
+    user: existing.user || remoteServerDefaultUser(existing.type),
     createdAt: existing.createdAt,
   };
 }
 
-function remoteServerId(host: string, keyPath: string): string {
-  return `ubuntu:${host.trim().toLowerCase()}:${keyPath.trim().toLowerCase()}`;
+function remoteServerId(type: RemoteServerKind, host: string, keyPath = ""): string {
+  const normalizedHost = host.trim().toLowerCase();
+  if (type === "alpine") return `alpine:${normalizedHost}`;
+  return `ubuntu:${normalizedHost}:${keyPath.trim().toLowerCase()}`;
+}
+
+function remoteServerDefaultUser(type: RemoteServerKind): string {
+  return type === "alpine" ? "dune" : "root";
+}
+
+function remoteServerKindLabel(type: RemoteServerKind): string {
+  return type === "alpine" ? "Alpine VM" : "Ubuntu";
 }
 
 function remoteServerActionRequest(server: RemoteServerRecord) {
   return {
+    serverType: server.type,
     host: server.host,
-    user: server.user || "root",
-    keyPath: server.keyPath,
+    user: server.user || remoteServerDefaultUser(server.type),
+    keyPath: server.type === "ubuntu" ? server.keyPath : undefined,
     namespace: server.namespace,
     battlegroupName: server.battlegroupName,
   };
@@ -3475,14 +3493,14 @@ function readRemoteServers(): RemoteServerRecord[] {
 function persistRemoteServers(servers: RemoteServerRecord[]): RemoteServerRecord[] {
   const profiles = uniqueBy(
     servers
-      .filter((server) => server.host.trim() && server.keyPath.trim())
+      .filter((server) => server.host.trim() && (server.type === "alpine" || server.keyPath.trim()))
       .map((server): RemoteServerProfile => ({
-        type: "ubuntu",
+        type: server.type,
         host: server.host,
-        keyPath: server.keyPath,
+        keyPath: server.type === "ubuntu" ? server.keyPath : undefined,
         createdAt: server.createdAt || new Date().toISOString(),
       })),
-    (profile) => remoteServerId(profile.host, profile.keyPath),
+    (profile) => remoteServerId(profile.type, profile.host, profile.keyPath || ""),
   );
   window.localStorage.setItem(remoteServersStorageKey, JSON.stringify(profiles));
   return servers;
@@ -3586,11 +3604,13 @@ function persistLocalServers(servers: DuneVmCandidate[]): DuneVmCandidate[] {
 function remoteServerProfileFromStored(value: unknown): RemoteServerProfile | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Partial<RemoteServerProfile & RemoteServerRecord>;
-  if (typeof record.host !== "string" || typeof record.keyPath !== "string") return null;
+  if (typeof record.host !== "string") return null;
+  const type = record.type === "alpine" ? "alpine" : "ubuntu";
+  if (type === "ubuntu" && typeof record.keyPath !== "string") return null;
   return {
-    type: "ubuntu",
+    type,
     host: record.host,
-    keyPath: record.keyPath,
+    keyPath: typeof record.keyPath === "string" ? record.keyPath : "",
     createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
   };
 }
@@ -3778,7 +3798,7 @@ function remoteSetupBlockingIssues(
   }
   if (!form.playerIp.trim()) issues.push("Player-facing IP is required.");
   if (parsePositiveInt(form.deepDesertWarmServers) > 0) {
-    issues.push("Warm Deep Desert Instances are not wired yet; set them to 0 for this build.");
+    issues.push("Warm Deep Desert Instances are not supported yet; set them to 0 for this build.");
   }
   if (deepDesertInstanceCount(form) > 1) {
     issues.push("Only one Deep Desert instance is supported in this build.");
@@ -4061,7 +4081,7 @@ function setupBlockingIssues(
     issues.push("VM Location already contains VM files. Choose another folder.");
   }
   if (parsePositiveInt(form.deepDesertWarmServers) > 0) {
-    issues.push("Warm Deep Desert Instances are not wired yet; set them to 0 for this build.");
+    issues.push("Warm Deep Desert Instances are not supported yet; set them to 0 for this build.");
   }
   if (deepDesertInstanceCount(form) > 1) {
     issues.push("Only one Deep Desert instance is supported in this build.");
@@ -4539,42 +4559,68 @@ function RemoteAttachDialog({
   onChange: (form: RemoteAttachForm) => void;
   onAttach: () => void;
 }) {
-  const canAttach = form.host.trim().length > 0 && form.keyPath.trim().length > 0 && !running;
+  const canAttach =
+    form.host.trim().length > 0 &&
+    (form.type === "alpine" || form.keyPath.trim().length > 0) &&
+    !running;
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Content maxWidth="520px">
-        <Dialog.Title>Add Remote Ubuntu Server</Dialog.Title>
+        <Dialog.Title>Add Remote Server</Dialog.Title>
         <Dialog.Description size="2" color="gray">
           Connect over SSH and detect existing Dune battlegroups. This does not provision or modify the server.
         </Dialog.Description>
         <Flex direction="column" gap="3" mt="4">
+          <Field label="Server type">
+            <Select.Root
+              value={form.type}
+              onValueChange={(value) => onChange({ ...form, type: value as RemoteServerKind })}
+              disabled={running}
+            >
+              <Select.Trigger />
+              <Select.Content>
+                <Select.Item value="ubuntu">Remote Ubuntu over SSH</Select.Item>
+                <Select.Item value="alpine">Remote Alpine VM over SSH</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          </Field>
           <Field label="Host or IP">
             <TextField.Root
               placeholder="203.0.113.10"
+              disabled={running}
               value={form.host}
               onChange={(event) => onChange({ ...form, host: event.target.value })}
             />
           </Field>
-          <Field label="Private Key">
-            <Grid columns="1fr auto" gap="2">
-              <TextField.Root
-                placeholder="Choose SSH private key"
-                value={form.keyPath}
-                onChange={(event) => onChange({ ...form, keyPath: event.target.value })}
-              />
-              <Button
-                type="button"
-                variant="surface"
-                disabled={running}
-                onClick={async () => {
-                  const selected = await openFileDialog("Choose SSH private key");
-                  if (selected) onChange({ ...form, keyPath: selected });
-                }}
-              >
-                Choose
-              </Button>
-            </Grid>
-          </Field>
+          {form.type === "ubuntu" ? (
+            <Field label="Private Key">
+              <Grid columns="1fr auto" gap="2">
+                <TextField.Root
+                  placeholder="Choose SSH private key"
+                  value={form.keyPath}
+                  disabled={running}
+                  onChange={(event) => onChange({ ...form, keyPath: event.target.value })}
+                />
+                <Button
+                  type="button"
+                  variant="surface"
+                  disabled={running}
+                  onClick={async () => {
+                    const selected = await openFileDialog("Choose SSH private key");
+                    if (selected) onChange({ ...form, keyPath: selected });
+                  }}
+                >
+                  Choose
+                </Button>
+              </Grid>
+            </Field>
+          ) : (
+            <Box className="setup-guide">
+              <Text size="2">
+                Alpine Dune guests use the stock server-package SSH key, so only the guest IP is needed.
+              </Text>
+            </Box>
+          )}
         </Flex>
         <Flex gap="3" justify="end" mt="5">
           <Dialog.Close>
@@ -4670,8 +4716,7 @@ function RemoveRemoteServerDialog({
       <AlertDialog.Content maxWidth="520px">
         <AlertDialog.Title>Forget Remote Server</AlertDialog.Title>
         <AlertDialog.Description size="2" color="gray">
-          This only removes the saved server entry from this app. The remote Ubuntu host and Dune battlegroup
-          will not be changed.
+          This only removes the saved server entry from this app. The remote host and Dune battlegroup will not be changed.
         </AlertDialog.Description>
         {server ? (
           <Box className="info-card" mt="4">

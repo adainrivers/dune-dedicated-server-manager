@@ -153,7 +153,9 @@ struct RemoteSetupRequest {
 #[serde(rename_all = "camelCase")]
 struct RemoteConnectionRequest {
     host: String,
-    key_path: String,
+    key_path: Option<String>,
+    server_type: Option<String>,
+    user: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -181,9 +183,10 @@ struct LocalHyperVServerRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteServerActionRequest {
+    server_type: Option<String>,
     host: String,
     user: String,
-    key_path: String,
+    key_path: Option<String>,
     namespace: String,
     battlegroup_name: String,
 }
@@ -247,9 +250,10 @@ struct RemoteServerComponent {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteComponentLogRequest {
+    server_type: Option<String>,
     host: String,
     user: String,
-    key_path: String,
+    key_path: Option<String>,
     namespace: String,
     component: String,
     tail: u32,
@@ -265,9 +269,10 @@ struct RemoteComponentLogResult {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteComponentRestartRequest {
+    server_type: Option<String>,
     host: String,
     user: String,
-    key_path: String,
+    key_path: Option<String>,
     namespace: String,
     component: String,
 }
@@ -492,17 +497,17 @@ async fn detect_remote_ubuntu_servers(
     request: RemoteConnectionRequest,
 ) -> Result<Vec<RemoteServerRecord>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let toolchain = Toolchain::from_default_root().map_err(|err| err.message)?;
-        toolchain
-            .install(ManagedTool::OpenSsh, false, None)
-            .map_err(|err| err.message)?;
-        let ssh_path = toolchain.status(ManagedTool::OpenSsh).executable;
-        let runner = OpenSshRunner::new(OpenSshTarget::new(
-            ssh_path,
-            PathBuf::from(&request.key_path),
-            "root",
+        let request = RemoteConnectionRequest {
+            server_type: Some("ubuntu".to_string()),
+            user: Some("root".to_string()),
+            ..request
+        };
+        let runner = runner_for_remote_kind(
+            request.server_type.as_deref(),
             request.host.clone(),
-        ));
+            request.user.as_deref().unwrap_or("root").to_string(),
+            request.key_path.clone(),
+        )?;
         let value = runner
             .run_json(
                 "sudo kubectl get battlegroups -A -o json",
@@ -513,6 +518,35 @@ async fn detect_remote_ubuntu_servers(
     })
     .await
     .map_err(|err| format!("Remote server detection worker failed: {err}"))?
+}
+
+#[tauri::command]
+async fn detect_remote_alpine_servers(
+    request: RemoteConnectionRequest,
+) -> Result<Vec<RemoteServerRecord>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let request = RemoteConnectionRequest {
+            server_type: Some("alpine".to_string()),
+            user: Some("dune".to_string()),
+            key_path: None,
+            ..request
+        };
+        let runner = runner_for_remote_kind(
+            request.server_type.as_deref(),
+            request.host.clone(),
+            "dune".to_string(),
+            None,
+        )?;
+        let value = runner
+            .run_json(
+                "sudo kubectl get battlegroups -A -o json",
+                "remote alpine guest battlegroups",
+            )
+            .map_err(command_error_message)?;
+        Ok(remote_records_from_battlegroups(&request, &value))
+    })
+    .await
+    .map_err(|err| format!("Remote Alpine guest detection worker failed: {err}"))?
 }
 
 #[tauri::command]
@@ -529,7 +563,12 @@ async fn remote_server_status(
     request: RemoteServerActionRequest,
 ) -> Result<RemoteServerStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let runner = remote_runner(request.host, request.user, request.key_path)?;
+        let runner = runner_for_remote_kind(
+            request.server_type.as_deref(),
+            request.host,
+            request.user,
+            request.key_path,
+        )?;
         read_remote_server_status(&runner, &request.namespace, &request.battlegroup_name)
             .map_err(command_error_message)
     })
@@ -542,7 +581,12 @@ async fn remote_server_components(
     request: RemoteServerActionRequest,
 ) -> Result<Vec<RemoteServerComponent>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let runner = remote_runner(request.host, request.user, request.key_path)?;
+        let runner = runner_for_remote_kind(
+            request.server_type.as_deref(),
+            request.host,
+            request.user,
+            request.key_path,
+        )?;
         read_remote_server_components(&runner, &request.namespace).map_err(command_error_message)
     })
     .await
@@ -563,7 +607,9 @@ async fn local_hyperv_runtime(
             .map_err(command_error_message)?;
         let connection = RemoteConnectionRequest {
             host: request.vm_name.clone(),
-            key_path: String::new(),
+            key_path: None,
+            server_type: Some("hyperv".to_string()),
+            user: Some("dune".to_string()),
         };
         let records = remote_records_from_battlegroups(&connection, &value);
         let Some(record) = records.first() else {
@@ -633,7 +679,12 @@ async fn remote_component_log_tail(
     request: RemoteComponentLogRequest,
 ) -> Result<RemoteComponentLogResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let runner = remote_runner(request.host, request.user, request.key_path)?;
+        let runner = runner_for_remote_kind(
+            request.server_type.as_deref(),
+            request.host,
+            request.user,
+            request.key_path,
+        )?;
         read_remote_component_log_tail(
             &runner,
             &request.namespace,
@@ -669,7 +720,12 @@ async fn restart_remote_component(
     request: RemoteComponentRestartRequest,
 ) -> Result<RemoteComponentRestartResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let runner = remote_runner(request.host, request.user, request.key_path)?;
+        let runner = runner_for_remote_kind(
+            request.server_type.as_deref(),
+            request.host,
+            request.user,
+            request.key_path,
+        )?;
         restart_remote_component_inner(&runner, &request.namespace, &request.component)
             .map_err(command_error_message)
     })
@@ -777,7 +833,12 @@ async fn run_remote_battlegroup_action(
     tauri::async_runtime::spawn_blocking(move || {
         let mut sink = TauriOperationSink { app: worker_app };
         sink.info("bg.check", "Checking remote battlegroup state.");
-        let runner = remote_runner(request.host, request.user, request.key_path)?;
+        let runner = runner_for_remote_kind(
+            request.server_type.as_deref(),
+            request.host,
+            request.user,
+            request.key_path,
+        )?;
         run_battlegroup_action_with_runner(
             &runner,
             &mut sink,
@@ -1290,18 +1351,48 @@ fn remote_record_from_battlegroup(
         .and_then(Value::as_str)
         .unwrap_or("Unknown")
         .to_string();
+    let server_type = request
+        .server_type
+        .as_deref()
+        .unwrap_or("ubuntu")
+        .trim()
+        .to_string();
+    let user = request
+        .user
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            if is_alpine_remote_kind(&server_type) {
+                "dune"
+            } else {
+                "root"
+            }
+        })
+        .to_string();
     Some(RemoteServerRecord {
-        server_type: "ubuntu".to_string(),
-        id: format!("ubuntu:{}", request.host),
+        id: remote_record_id(&server_type, &request.host, request.key_path.as_deref()),
         name: title,
         host: request.host.clone(),
-        user: "root".to_string(),
-        key_path: request.key_path.clone(),
+        user,
+        key_path: request.key_path.clone().unwrap_or_default(),
+        server_type,
         namespace,
         battlegroup_name: battlegroup_name.clone(),
         world_unique_name: battlegroup_name,
         phase,
     })
+}
+
+fn remote_record_id(server_type: &str, host: &str, key_path: Option<&str>) -> String {
+    if is_alpine_remote_kind(server_type) {
+        format!("alpine:{}", host.trim().to_lowercase())
+    } else {
+        format!(
+            "ubuntu:{}:{}",
+            host.trim().to_lowercase(),
+            key_path.unwrap_or_default().trim().to_lowercase()
+        )
+    }
 }
 
 fn ensure_remote_world<R>(
@@ -1348,6 +1439,43 @@ fn remote_runner(host: String, user: String, key_path: String) -> Result<OpenSsh
         user,
         host,
     )))
+}
+
+fn runner_for_remote_kind(
+    server_type: Option<&str>,
+    host: String,
+    user: String,
+    key_path: Option<String>,
+) -> Result<OpenSshRunner, String> {
+    if is_alpine_remote_kind(server_type.unwrap_or_default()) {
+        return alpine_guest_runner(host);
+    }
+    let key_path = key_path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "SSH private key is required for remote Ubuntu servers.".to_string())?;
+    remote_runner(host, user, key_path)
+}
+
+fn alpine_guest_runner(host: String) -> Result<OpenSshRunner, String> {
+    let host = host.trim().to_string();
+    if host.is_empty() {
+        return Err("Remote Alpine guest IP is required.".to_string());
+    }
+    let toolchain = Toolchain::from_default_root().map_err(|err| err.message)?;
+    toolchain
+        .install(ManagedTool::OpenSsh, false, None)
+        .map_err(|err| err.message)?;
+    let ssh_path = toolchain.status(ManagedTool::OpenSsh).executable;
+    let server_package_dir = default_server_package_dir().map_err(|err| err.message)?;
+    let key_path = prepare_vendor_ssh_key(&server_package_dir).map_err(command_error_message)?;
+    Ok(OpenSshRunner::new(OpenSshTarget::new(
+        ssh_path, key_path, "dune", host,
+    )))
+}
+
+fn is_alpine_remote_kind(server_type: &str) -> bool {
+    matches!(server_type.trim(), "alpine" | "remoteHyperv")
 }
 
 fn start_server_tunnel_inner(
@@ -1492,6 +1620,16 @@ fn tunnel_target(request: &ServerTunnelStartRequest) -> Result<OpenSshTarget, St
             request.user.as_deref().unwrap_or("root").trim().to_string(),
             request.host.trim().to_string(),
         )),
+        "alpine" | "remoteHyperv" => {
+            let host = request.host.trim().to_string();
+            if host.is_empty() {
+                return Err("Remote Alpine guest IP is required.".to_string());
+            }
+            let server_package_dir = default_server_package_dir().map_err(|err| err.message)?;
+            let key_path =
+                prepare_vendor_ssh_key(&server_package_dir).map_err(command_error_message)?;
+            Ok(OpenSshTarget::new(ssh_path, key_path, "dune", host))
+        }
         "hyperv" => {
             let vm_name = request
                 .vm_name
@@ -2283,7 +2421,7 @@ where
 
     if request.deep_desert_warm_servers > 0 {
         return Err(dune_manager_core::errors::failure(
-            "Warm Deep Desert instances are not wired to Kubernetes yet; set Warm Deep Desert Instances to 0 for this build.",
+            "Warm Deep Desert instances are not supported yet; set Warm Deep Desert Instances to 0 for this build.",
         ));
     }
 
@@ -2385,6 +2523,7 @@ pub fn run() {
             start_local_hyperv_server,
             stop_local_hyperv_server,
             detect_remote_ubuntu_servers,
+            detect_remote_alpine_servers,
             generate_ubuntu_ssh_key,
             preflight_remote_ubuntu,
             start_full_setup,
