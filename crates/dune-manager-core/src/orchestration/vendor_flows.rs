@@ -437,11 +437,11 @@ pub fn hyperv_initial_setup_flow() -> FlowSpec {
             ),
             step(
                 "ssh.prepare-key",
-                "Copy and lock bundled SSH key",
+                "Seed and rotate VM SSH key",
                 StepDomain::Ssh,
                 StepAction::Configure,
-                "Copy-Item + icacls temp key",
-                "Rust key manager with Windows ACL helper",
+                "Update-SshKey -UseBundledKey",
+                "Rust key rotation into host-local active VM key",
                 StepFlags::new(false, false),
             ),
             step(
@@ -742,11 +742,11 @@ pub fn battlegroup_management_flow() -> FlowSpec {
             ),
             step(
                 "bg.ssh.prepare-key",
-                "Prepare locked SSH key copy",
+                "Prepare active or bootstrap SSH key",
                 StepDomain::Ssh,
                 StepAction::Configure,
-                "Copy-Item + icacls temp key",
-                "Rust key manager with Windows ACL helper",
+                "%LOCALAPPDATA% active key, falling back to bundled bootstrap key",
+                "Rust key candidate manager with Windows ACL helper",
                 StepFlags::new(false, false),
             ),
             step(

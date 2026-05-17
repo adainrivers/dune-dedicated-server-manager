@@ -544,7 +544,25 @@ $SUDO mkdir -p /etc/rancher/k3s
 if [ ! -f /etc/rancher/k3s/kubelet-config.yaml ] \
   || ! grep -Eq '^[[:space:]]*kind:[[:space:]]*KubeletConfiguration[[:space:]]*$' /etc/rancher/k3s/kubelet-config.yaml \
   || ! grep -Eq '^[[:space:]]*failSwapOn:[[:space:]]*false[[:space:]]*$' /etc/rancher/k3s/kubelet-config.yaml; then
-  printf 'apiVersion: kubelet.config.k8s.io/v1beta1\nkind: KubeletConfiguration\nfailSwapOn: false\nmemorySwap:\n  swapBehavior: LimitedSwap\n' | $SUDO tee /etc/rancher/k3s/kubelet-config.yaml >/dev/null
+  cat <<'EOF' | $SUDO tee /etc/rancher/k3s/kubelet-config.yaml >/dev/null
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+imageGCHighThresholdPercent: 99
+imageGCLowThresholdPercent: 98
+failSwapOn: false
+memorySwap:
+  swapBehavior: LimitedSwap
+evictionHard:
+  memory.available: "100Mi"
+  nodefs.available: "1%"
+  nodefs.inodesFree: "1%"
+  imagefs.available: "1%"
+  imagefs.inodesFree: "1%"
+containerLogMaxSize: "50Mi"
+containerLogMaxFiles: 2
+systemReserved:
+  memory: "2Gi"
+EOF
 fi
 if [ ! -f /etc/rancher/k3s/config.yaml ]; then
   printf 'kubelet-arg:\n- config=/etc/rancher/k3s/kubelet-config.yaml\n' | $SUDO tee /etc/rancher/k3s/config.yaml >/dev/null
@@ -1031,14 +1049,14 @@ spec:
         - --zap-devel=false
         - --zap-log-level=debug
         - --zap-time-encoding=iso8601
-        - --db-max-concurrent=2
-        - --dbdepl-max-concurrent=2
-        - --dbutil-max-concurrent=2
-        - --dbop-max-concurrent=2
-        - --dbb-max-concurrent=2
-        - --dbbs-max-concurrent=2
-        - --dbr-max-concurrent=2
-        - --dbm-max-concurrent=2
+        - --db-max-concurrent=1
+        - --dbdepl-max-concurrent=1
+        - --dbutil-max-concurrent=1
+        - --dbop-max-concurrent=1
+        - --dbb-max-concurrent=1
+        - --dbbs-max-concurrent=1
+        - --dbr-max-concurrent=1
+        - --dbm-max-concurrent=1
         - --dbutil-supports-prometheus=false
         image: registry.funcom.com/funcom/self-hosting/igw-k8s-database-operator:__OPERATOR_VERSION__
         imagePullPolicy: IfNotPresent
@@ -1187,5 +1205,18 @@ mod tests {
             ..UbuntuSshPrepareRequest::default()
         };
         assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn ubuntu_operator_manifest_matches_vendor_database_concurrency_patch() {
+        assert!(OPERATOR_DEPLOYMENTS_YAML.contains("--db-max-concurrent=1"));
+        assert!(OPERATOR_DEPLOYMENTS_YAML.contains("--dbdepl-max-concurrent=1"));
+        assert!(OPERATOR_DEPLOYMENTS_YAML.contains("--dbutil-max-concurrent=1"));
+        assert!(OPERATOR_DEPLOYMENTS_YAML.contains("--dbop-max-concurrent=1"));
+        assert!(OPERATOR_DEPLOYMENTS_YAML.contains("--dbb-max-concurrent=1"));
+        assert!(OPERATOR_DEPLOYMENTS_YAML.contains("--dbbs-max-concurrent=1"));
+        assert!(OPERATOR_DEPLOYMENTS_YAML.contains("--dbr-max-concurrent=1"));
+        assert!(OPERATOR_DEPLOYMENTS_YAML.contains("--dbm-max-concurrent=1"));
+        assert!(!OPERATOR_DEPLOYMENTS_YAML.contains("--dbutil-max-concurrent=2"));
     }
 }

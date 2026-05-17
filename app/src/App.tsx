@@ -5909,7 +5909,8 @@ function RemoteAttachDialog({
           ) : (
             <Box className="setup-guide">
               <Text size="2">
-                Alpine Dune guests use the stock server-package SSH key, so only the guest IP is needed.
+                Alpine Dune guests use the active VM SSH key from this Windows profile, with the
+                packaged bootstrap key as fallback, so only the guest IP is needed.
               </Text>
             </Box>
           )}

@@ -45,6 +45,41 @@ impl ExperimentalSwapRequest {
     }
 }
 
+/// Request for applying the low-memory BattleGroup resource profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LowMemoryBattlegroupProfileRequest {
+    /// Kubernetes namespace containing the BattleGroup.
+    pub namespace: String,
+    /// BattleGroup resource name.
+    pub battlegroup_name: String,
+    /// Swap file size in GiB used to choose the profile strength.
+    pub swap_size_gib: u64,
+}
+
+impl LowMemoryBattlegroupProfileRequest {
+    /// Creates a low-memory resource profile request.
+    pub fn new(
+        namespace: impl Into<String>,
+        battlegroup_name: impl Into<String>,
+        swap_size_gib: u64,
+    ) -> Self {
+        Self {
+            namespace: namespace.into(),
+            battlegroup_name: battlegroup_name.into(),
+            swap_size_gib,
+        }
+    }
+
+    fn validate(&self) -> CommandResult<()> {
+        validate_kube_arg(&self.namespace, "namespace")?;
+        validate_kube_arg(&self.battlegroup_name, "battlegroup name")?;
+        if !(1..=256).contains(&self.swap_size_gib) {
+            return Err(failure("swap size must be between 1 and 256 GiB"));
+        }
+        Ok(())
+    }
+}
+
 /// Snapshot of the guest experimental swap state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,15 +168,47 @@ where
             request.restart_k3s,
         ))?;
 
+        let operation_count = self.apply_battlegroup_memory_profile(
+            &LowMemoryBattlegroupProfileRequest::new(
+                &request.namespace,
+                &request.battlegroup_name,
+                request.swap_size_gib,
+            ),
+            sink,
+        )?;
+
+        emit(
+            sink,
+            "guest-swap.status",
+            "Verifying experimental swap status.",
+            StepDomain::Guest,
+            StepAction::Check,
+        );
+        let status = self.status(Some((&request.namespace, &request.battlegroup_name)))?;
+        Ok(ExperimentalSwapResult {
+            status,
+            battlegroup_patch_operations: operation_count,
+        })
+    }
+
+    /// Applies only the BattleGroup memory profile, without touching swap or k3s.
+    pub fn apply_battlegroup_memory_profile(
+        &self,
+        request: &LowMemoryBattlegroupProfileRequest,
+        sink: &mut impl OperationSink,
+    ) -> CommandResult<usize> {
+        request.validate()?;
+
         emit(
             sink,
             "bg-swap.patch-memory",
-            "Applying experimental BattleGroup memory profile.",
+            "Applying low-memory BattleGroup memory profile.",
             StepDomain::Kubernetes,
             StepAction::Patch,
         );
         let battlegroup = self.battlegroup(&request.namespace, &request.battlegroup_name)?;
-        let operations = experimental_swap_patch_operations(&battlegroup)?;
+        let operations =
+            experimental_swap_patch_operations_for_swap(&battlegroup, request.swap_size_gib)?;
         let operation_count = operations.len();
         if !operations.is_empty() {
             let patch = serde_json::to_string(&operations).map_err(|err| {
@@ -159,18 +226,7 @@ where
                 .run_json(&command, "experimental swap battlegroup patch")?;
         }
 
-        emit(
-            sink,
-            "guest-swap.status",
-            "Verifying experimental swap status.",
-            StepDomain::Guest,
-            StepAction::Check,
-        );
-        let status = self.status(Some((&request.namespace, &request.battlegroup_name)))?;
-        Ok(ExperimentalSwapResult {
-            status,
-            battlegroup_patch_operations: operation_count,
-        })
+        Ok(operation_count)
     }
 
     fn battlegroup(&self, namespace: &str, battlegroup_name: &str) -> CommandResult<Value> {
@@ -273,6 +329,13 @@ fi
 }
 
 fn experimental_swap_patch_operations(value: &Value) -> CommandResult<Vec<Value>> {
+    experimental_swap_patch_operations_for_swap(value, 30)
+}
+
+fn experimental_swap_patch_operations_for_swap(
+    value: &Value,
+    swap_size_gib: u64,
+) -> CommandResult<Vec<Value>> {
     let sets_path = ["spec", "serverGroup", "template", "spec", "sets"];
     let sets = value
         .pointer("/spec/serverGroup/template/spec/sets")
@@ -283,7 +346,7 @@ fn experimental_swap_patch_operations(value: &Value) -> CommandResult<Vec<Value>
     let mut operations = Vec::new();
     for (index, set) in sets.iter().enumerate() {
         let map = set["map"].as_str().unwrap_or_default();
-        let profile = memory_profile_for_map(map);
+        let profile = memory_profile_for_map(map, swap_size_gib);
         let mut base = sets_path
             .iter()
             .map(|part| (*part).to_string())
@@ -302,8 +365,20 @@ fn experimental_swap_patch_operations(value: &Value) -> CommandResult<Vec<Value>
             ));
             continue;
         }
-        ensure_memory_value(set, &base, "limits", profile.limit, &mut operations);
-        ensure_memory_value(set, &base, "requests", profile.request, &mut operations);
+        ensure_memory_value(
+            set,
+            &base,
+            "limits",
+            profile.limit.as_str(),
+            &mut operations,
+        );
+        ensure_memory_value(
+            set,
+            &base,
+            "requests",
+            profile.request.as_str(),
+            &mut operations,
+        );
     }
     Ok(operations)
 }
@@ -344,27 +419,36 @@ fn ensure_memory_value(
     }));
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct MemoryProfile {
-    limit: &'static str,
-    request: &'static str,
+    limit: String,
+    request: String,
 }
 
-fn memory_profile_for_map(map: &str) -> MemoryProfile {
+fn memory_profile_for_map(map: &str, swap_size_gib: u64) -> MemoryProfile {
     match map {
         "Survival_1" => MemoryProfile {
-            limit: "12Gi",
-            request: "5Gi",
+            limit: scaled_gi_profile(20, 12, swap_size_gib),
+            request: scaled_gi_profile(20, 5, swap_size_gib),
         },
         "DeepDesert_1" => MemoryProfile {
-            limit: "10Gi",
-            request: "3Gi",
+            limit: "10Gi".to_string(),
+            request: scaled_gi_profile(10, 3, swap_size_gib),
         },
         _ => MemoryProfile {
-            limit: "1Gi",
-            request: "200Mi",
+            limit: "1Gi".to_string(),
+            request: "200Mi".to_string(),
         },
     }
+}
+
+fn scaled_gi_profile(no_swap_gib: u64, vendor_swap_gib: u64, swap_size_gib: u64) -> String {
+    const VENDOR_SWAP_GIB: u64 = 30;
+    let swap = swap_size_gib.min(VENDOR_SWAP_GIB);
+    let delta = no_swap_gib.saturating_sub(vendor_swap_gib);
+    let reduction = (delta * swap).div_ceil(VENDOR_SWAP_GIB);
+    let value = no_swap_gib.saturating_sub(reduction).max(vendor_swap_gib);
+    format!("{value}Gi")
 }
 
 fn emit(
@@ -481,6 +565,45 @@ mod tests {
         assert!(text.contains("3Gi"));
         assert!(text.contains("200Mi"));
         assert!(!text.contains("jq"));
+    }
+
+    #[test]
+    fn smaller_swap_uses_softer_memory_profile() {
+        let battlegroup = json!({
+            "spec": {
+                "serverGroup": {
+                    "template": {
+                        "spec": {
+                            "sets": [
+                                {
+                                    "map": "Survival_1",
+                                    "resources": {
+                                        "limits": { "memory": "20Gi" },
+                                        "requests": { "memory": "20Gi" }
+                                    }
+                                },
+                                {
+                                    "map": "DeepDesert_1",
+                                    "resources": {
+                                        "limits": { "memory": "10Gi" },
+                                        "requests": { "memory": "10Gi" }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+
+        let operations = experimental_swap_patch_operations_for_swap(&battlegroup, 10).unwrap();
+        let text = serde_json::to_string(&operations).unwrap();
+
+        assert!(text.contains("\"17Gi\""));
+        assert!(text.contains("\"15Gi\""));
+        assert!(text.contains("\"7Gi\""));
+        assert!(!text.contains("\"12Gi\""));
+        assert!(!text.contains("\"5Gi\""));
     }
 
     #[test]

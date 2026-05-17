@@ -16,18 +16,19 @@ use dune_manager_core::orchestration::{
     ExperimentalSwapOrchestrator, ExperimentalSwapRequest, GuestBootstrapOrchestrator,
     GuestBootstrapPlan, GuestBootstrapProvider, GuestNetworkConfig, GuestNetworkPlan,
     GuestProvider, HyperVVmLifecycleOrchestrator, HyperVVmSetupOrchestrator, HyperVVmSetupRequest,
-    InstanceMap, KubernetesProvider, MapInstanceOrchestrator, MemoryProfile, OpenSshGuestProvider,
-    OpenSshRunner, OpenSshTarget, OperationSink, OrchestrationEvent, ProxmoxClient,
-    ProxmoxClientConfig, ProxmoxCreateVmRequest, ProxmoxDetection, ProxmoxVmStatus,
-    RemoteCommandRunner, SetMapInstancesRequest, SshGuestBootstrapProvider, StrictPowerShellHyperV,
-    StructuredKubectl, UbuntuSshPreflight, UbuntuSshPrepareRequest, UbuntuSshSetup,
-    UbuntuSwapRequest, VmProvider, WorldManifestRequest,
+    InstanceMap, KubernetesProvider, LowMemoryBattlegroupProfileRequest, MapInstanceOrchestrator,
+    MemoryProfile, OpenSshGuestProvider, OpenSshRunner, OpenSshTarget, OperationSink,
+    OrchestrationEvent, ProxmoxClient, ProxmoxClientConfig, ProxmoxCreateVmRequest,
+    ProxmoxDetection, ProxmoxVmStatus, RemoteCommandRunner, SetMapInstancesRequest,
+    SshGuestBootstrapProvider, StrictPowerShellHyperV, StructuredKubectl, UbuntuSshPreflight,
+    UbuntuSshPrepareRequest, UbuntuSshSetup, UbuntuSwapRequest, VmProvider, WorldManifestRequest,
 };
 use dune_manager_core::security::redact_text;
 use dune_manager_core::shell::{ps_single_quoted, run_powershell};
 use dune_manager_core::toolchain::{
     default_server_package_dir, default_vm_destination, prepare_vendor_ssh_key,
-    prepare_vendor_ssh_key_candidates, ManagedTool, ServerPackageStatus, Toolchain,
+    prepare_vendor_ssh_key_candidates, rotate_vendor_guest_ssh_key, ManagedTool,
+    ServerPackageStatus, Toolchain,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1585,9 +1586,23 @@ fn run_full_setup(
         "Waiting for VM IPv4 address from DHCP.",
     );
     let first_ip = wait_for_vm_ipv4(&provider, &vm.vm_name, 180)?;
-    let guest = OpenSshGuestProvider::new(ssh_path.clone(), ssh_key.clone(), "dune");
+    let mut guest = OpenSshGuestProvider::new(ssh_path.clone(), ssh_key.clone(), "dune");
     sink.info("guest.wait-for-ssh", "Waiting for guest SSH.");
     guest.wait_for_ssh(&first_ip, 180)?;
+
+    sink.info(
+        "ssh.rotate-key",
+        "Generating and installing a fresh VM SSH key.",
+    );
+    let rotation =
+        rotate_vendor_guest_ssh_key(&server_package_dir, &ssh_path, &ssh_key, &first_ip)?;
+    if rotation.rotated {
+        sink.info("ssh.rotate-key", rotation.message.clone());
+        guest = OpenSshGuestProvider::new(ssh_path.clone(), rotation.key_path.clone(), "dune");
+        guest.wait_for_ssh(&first_ip, 180)?;
+    } else {
+        sink.warn("ssh.rotate-key", rotation.message.clone());
+    }
 
     let guest_ip = match &guest_network {
         GuestNetworkPlan::Dhcp => first_ip,
@@ -1609,7 +1624,7 @@ fn run_full_setup(
 
     let bootstrap_runner = OpenSshRunner::new(OpenSshTarget::new(
         ssh_path,
-        ssh_key,
+        rotation.key_path,
         "dune",
         guest_ip.clone(),
     ));
@@ -1695,8 +1710,10 @@ fn run_remote_ubuntu_setup(
     }
 
     ubuntu.prepare_host(&prepare, sink)?;
+    let mut ubuntu_swap_size_gib = None;
     if request.enable_swap {
         let swap_size_gib = recommended_ubuntu_swap_gib(&preflight, &request);
+        ubuntu_swap_size_gib = Some(swap_size_gib);
         let required_gib = required_layout_memory_gib(
             request.survival_instances,
             request.deep_desert_pve_instances + request.deep_desert_pvp_instances,
@@ -1783,6 +1800,23 @@ fn run_remote_ubuntu_setup(
         &runner,
         sink,
     )?;
+    if let Some(swap_size_gib) = ubuntu_swap_size_gib {
+        let operations = ExperimentalSwapOrchestrator::new(runner.clone())
+            .apply_battlegroup_memory_profile(
+                &LowMemoryBattlegroupProfileRequest::new(
+                    &created.namespace,
+                    &created.battlegroup_name,
+                    swap_size_gib,
+                ),
+                sink,
+            )?;
+        sink.info(
+            "ubuntu.swap.memory-profile",
+            format!(
+                "Applied Ubuntu low-memory BattleGroup profile with {operations} resource patch operations."
+            ),
+        );
+    }
 
     wait_for_database_ready(&runner, &created.namespace, 900, sink)?;
 

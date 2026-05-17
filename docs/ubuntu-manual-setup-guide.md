@@ -100,9 +100,21 @@ sudo mkdir -p /etc/rancher/k3s
 sudo tee /etc/rancher/k3s/kubelet-config.yaml >/dev/null <<'EOF'
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
+imageGCHighThresholdPercent: 99
+imageGCLowThresholdPercent: 98
 failSwapOn: false
 memorySwap:
   swapBehavior: LimitedSwap
+evictionHard:
+  memory.available: "100Mi"
+  nodefs.available: "1%"
+  nodefs.inodesFree: "1%"
+  imagefs.available: "1%"
+  imagefs.inodesFree: "1%"
+containerLogMaxSize: "50Mi"
+containerLogMaxFiles: 2
+systemReserved:
+  memory: "2Gi"
 EOF
 
 sudo tee /etc/rancher/k3s/config.yaml >/dev/null <<'EOF'
@@ -464,14 +476,14 @@ spec:
         - --zap-devel=false
         - --zap-log-level=debug
         - --zap-time-encoding=iso8601
-        - --db-max-concurrent=2
-        - --dbdepl-max-concurrent=2
-        - --dbutil-max-concurrent=2
-        - --dbop-max-concurrent=2
-        - --dbb-max-concurrent=2
-        - --dbbs-max-concurrent=2
-        - --dbr-max-concurrent=2
-        - --dbm-max-concurrent=2
+        - --db-max-concurrent=1
+        - --dbdepl-max-concurrent=1
+        - --dbutil-max-concurrent=1
+        - --dbop-max-concurrent=1
+        - --dbb-max-concurrent=1
+        - --dbbs-max-concurrent=1
+        - --dbr-max-concurrent=1
+        - --dbm-max-concurrent=1
         - --dbutil-supports-prometheus=false
         image: registry.funcom.com/funcom/self-hosting/igw-k8s-database-operator:__OPERATOR_VERSION__
         imagePullPolicy: IfNotPresent
@@ -686,15 +698,19 @@ if [ "$PATCH" != "[]" ]; then
 fi
 ```
 
-## 12. Install the battlegroup helper shortcut
+## 12. Install the battlegroup helper shortcuts
 
-The vendor setup normally creates this helper. Run these commands anyway if `/home/dune/.dune/bin/battlegroup` is missing or not executable.
+The vendor setup normally creates these helpers. Run these commands anyway if `/home/dune/.dune/bin/battlegroup` or `/home/dune/.dune/bin/bg-util` is missing or not executable.
 
 ```sh
 sudo mkdir -p /home/dune/.dune/bin
 sudo ln -sfn /home/dune/.dune/download/scripts/battlegroup.sh /home/dune/.dune/bin/battlegroup
 sudo chmod +x /home/dune/.dune/download/scripts/battlegroup.sh
 sudo chown -h dune:dune /home/dune/.dune/bin/battlegroup
+
+sudo ln -sfn /home/dune/.dune/download/scripts/bg-util /home/dune/.dune/bin/bg-util
+sudo chmod +x /home/dune/.dune/download/scripts/bg-util
+sudo chown -h dune:dune /home/dune/.dune/bin/bg-util
 ```
 
 You can now manage the server from SSH with:

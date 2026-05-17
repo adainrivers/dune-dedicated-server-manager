@@ -76,8 +76,11 @@ where
 
     fn patch_operator_images(&self) -> CommandResult<()> {
         self.run_phase(&format!(
-            "{}\n{}\n{}",
-            KUBECTL_HELPERS, CONTAINER_IMAGE_HELPERS, PATCH_OPERATOR_IMAGES_SCRIPT
+            "{}\n{}\n{}\n{}",
+            KUBECTL_HELPERS,
+            CONTAINER_IMAGE_HELPERS,
+            PATCH_DATABASE_OPERATOR_SCRIPT,
+            PATCH_OPERATOR_IMAGES_SCRIPT
         ))?;
         Ok(())
     }
@@ -316,7 +319,13 @@ load_image_from_file() {
     if sudo ctr -n k8s.io images import "$DOWNLOAD_PATH/$file_name" >&2; then
       return 0
     fi
-    sleep 5
+    echo "Import of $file_name failed (attempt $attempt/3)." >&2
+    if ! sudo ctr -n k8s.io version >/dev/null 2>&1; then
+      echo "k3s/containerd is not responding; restarting k3s." >&2
+      restart_k3s_and_wait_until_ready
+    else
+      sleep 5
+    fi
     attempt=$((attempt + 1))
   done
   echo "Failed to import $file_name after 3 attempts" >&2
@@ -355,6 +364,23 @@ kubectl_retry() {
   done
   echo "kubectl $* still failing after retries" >&2
   return 1
+}
+restart_k3s_and_wait_until_ready() {
+  local elapsed=0
+  sudo rc-service k3s restart >&2
+  echo "Waiting for k3s containerd socket..." >&2
+  while [ ! -S /run/k3s/containerd/containerd.sock ]; do
+    sleep 2
+    elapsed=$((elapsed + 2))
+    if [ "$elapsed" -ge 60 ]; then echo "k3s containerd did not return in 60s" >&2; return 1; fi
+  done
+  echo "Waiting for k3s API server..." >&2
+  elapsed=0
+  until sudo kubectl get nodes >/dev/null 2>&1; do
+    sleep 2
+    elapsed=$((elapsed + 2))
+    if [ "$elapsed" -ge 60 ]; then echo "k3s API did not return in 60s" >&2; return 1; fi
+  done
 }
 wait_for_deployment() {
   local ns="$1" name="$2" timeout="${3:-120}" elapsed=0
@@ -401,6 +427,7 @@ fi
 const PATCH_OPERATOR_IMAGES_SCRIPT: &str = r#"
 if operator_versions_differ; then
   new_operator_version=$(cat "$DOWNLOAD_PATH/images/operators/version.txt")
+  patch_database_operator_concurrency
   load_image_from_file "images/operators/battlegroup-operator.tar"
   load_image_from_file "images/operators/database-operator.tar"
   load_image_from_file "images/operators/server-operator.tar"
@@ -410,6 +437,18 @@ if operator_versions_differ; then
   kubectl_retry set -n funcom-operators image deployment/serveroperator-controller-manager manager=registry.funcom.com/funcom/self-hosting/igw-k8s-server-operator:"$new_operator_version"
   kubectl_retry set -n funcom-operators image deployment/utilitiesoperator-controller-manager manager=registry.funcom.com/funcom/self-hosting/igw-k8s-utilities-operator:"$new_operator_version"
 fi
+"#;
+
+const PATCH_DATABASE_OPERATOR_SCRIPT: &str = r#"
+patch_database_operator_concurrency() {
+  current_args=$(sudo kubectl get -n funcom-operators deployment/databaseoperator-controller-manager -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null || true)
+  if ! printf '%s' "$current_args" | grep -q 'dbutil-max-concurrent=2'; then
+    return 0
+  fi
+  patch='[{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["--leader-elect","--zap-devel=false","--zap-log-level=debug","--zap-time-encoding=iso8601","--db-max-concurrent=1","--dbdepl-max-concurrent=1","--dbutil-max-concurrent=1","--dbop-max-concurrent=1","--dbb-max-concurrent=1","--dbbs-max-concurrent=1","--dbr-max-concurrent=1","--dbm-max-concurrent=1","--dbutil-supports-prometheus=false"]}]'
+  kubectl_retry patch deployment -n funcom-operators databaseoperator-controller-manager --type=json -p="$patch"
+  kubectl_retry rollout -n funcom-operators status deployment/databaseoperator-controller-manager --timeout=120s
+}
 "#;
 
 const SCALE_OPERATOR_SCRIPT: &str = r#"
@@ -423,8 +462,11 @@ const INSTALL_HELPER_SCRIPT: &str = r#"
 set -eu
 mkdir -p /home/dune/.dune/bin
 test -f /home/dune/.dune/download/scripts/battlegroup.sh
+test -f /home/dune/.dune/download/scripts/bg-util
 ln -sfn /home/dune/.dune/download/scripts/battlegroup.sh /home/dune/.dune/bin/battlegroup
 chmod +x /home/dune/.dune/download/scripts/battlegroup.sh
+ln -sfn /home/dune/.dune/download/scripts/bg-util /home/dune/.dune/bin/bg-util
+chmod +x /home/dune/.dune/download/scripts/bg-util
 "#;
 
 fn create_world_script(request: &WorldManifestRequest) -> String {
@@ -751,7 +793,37 @@ mod tests {
         let scripts = scripts.borrow();
         assert!(scripts[0].contains("rc-service k3s restart"));
         assert!(scripts[1].contains("coredns-coredns.tar"));
+        assert!(scripts[1].contains("restart_k3s_and_wait_until_ready"));
         assert!(scripts[2].contains("scale_deployment kube-system coredns 1"));
+    }
+
+    #[test]
+    fn operator_update_includes_vendor_database_concurrency_patch() {
+        let remote = MockRemote::default();
+        let scripts = remote.scripts.clone();
+        let provider = SshGuestBootstrapProvider::new(remote);
+
+        provider.patch_operator_images().unwrap();
+
+        let script = scripts.borrow().first().cloned().unwrap();
+        assert!(script.contains("patch_database_operator_concurrency"));
+        assert!(script.contains("dbutil-max-concurrent=2"));
+        assert!(script.contains("dbutil-max-concurrent=1"));
+        assert!(script.contains("kubectl_retry rollout -n funcom-operators status"));
+    }
+
+    #[test]
+    fn helper_install_links_battlegroup_and_bg_util() {
+        let remote = MockRemote::default();
+        let scripts = remote.scripts.clone();
+        let provider = SshGuestBootstrapProvider::new(remote);
+
+        provider.install_battlegroup_helper().unwrap();
+
+        let script = scripts.borrow().first().cloned().unwrap();
+        assert!(script.contains("/home/dune/.dune/bin/battlegroup"));
+        assert!(script.contains("/home/dune/.dune/bin/bg-util"));
+        assert!(script.contains("chmod +x /home/dune/.dune/download/scripts/bg-util"));
     }
 
     #[test]
