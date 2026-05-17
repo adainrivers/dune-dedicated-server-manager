@@ -26,8 +26,8 @@ use dune_manager_core::orchestration::{
 use dune_manager_core::security::redact_text;
 use dune_manager_core::shell::{ps_single_quoted, run_powershell};
 use dune_manager_core::toolchain::{
-    default_server_package_dir, default_vm_destination, prepare_vendor_ssh_key, ManagedTool,
-    ServerPackageStatus, Toolchain,
+    default_server_package_dir, default_vm_destination, prepare_vendor_ssh_key,
+    prepare_vendor_ssh_key_candidates, ManagedTool, ServerPackageStatus, Toolchain,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -564,9 +564,19 @@ async fn update_server_package(app: tauri::AppHandle) -> Result<ServerPackageSta
         toolchain
             .install_server_package(&server_package_dir)
             .map_err(command_error_message)?;
-        toolchain
+        let status = toolchain
             .server_package_status(server_package_dir)
-            .map_err(command_error_message)
+            .map_err(command_error_message)?;
+        sink.info("server-package", status.message.clone());
+        if status.complete && !status.update_available {
+            sink.info("server-package", "Dune server package update completed.");
+        } else {
+            sink.warn(
+                "server-package",
+                "Dune server package update finished, but the package still needs attention.",
+            );
+        }
+        Ok(status)
     })
     .await
     .map_err(|err| format!("Server package update worker failed: {err}"))?
@@ -2328,6 +2338,29 @@ fn remote_runner(host: String, user: String, key_path: String) -> Result<OpenSsh
     )))
 }
 
+fn vendor_guest_target(ssh_path: PathBuf, host: String) -> Result<OpenSshTarget, String> {
+    let server_package_dir = default_server_package_dir().map_err(|err| err.message)?;
+    let candidates =
+        prepare_vendor_ssh_key_candidates(&server_package_dir).map_err(command_error_message)?;
+    let mut last_error = None;
+    for key_path in candidates {
+        let target = OpenSshTarget::new(ssh_path.clone(), key_path, "dune", host.clone());
+        let runner = OpenSshRunner::new(target.clone());
+        match runner.run("true") {
+            Ok(_) => return Ok(target),
+            Err(err) => last_error = Some(command_error_message(err)),
+        }
+    }
+    let detail = last_error.unwrap_or_else(|| "no vendor SSH key candidates were available".into());
+    Err(format!(
+        "Could not authenticate to the Dune guest. Tried the vendor active SSH key and packaged bootstrap key. Last error: {detail}"
+    ))
+}
+
+fn vendor_guest_runner(ssh_path: PathBuf, host: String) -> Result<OpenSshRunner, String> {
+    Ok(OpenSshRunner::new(vendor_guest_target(ssh_path, host)?))
+}
+
 fn runner_for_remote_kind(
     server_type: Option<&str>,
     host: String,
@@ -2354,11 +2387,7 @@ fn alpine_guest_runner(host: String) -> Result<OpenSshRunner, String> {
         .install(ManagedTool::OpenSsh, false, None)
         .map_err(|err| err.message)?;
     let ssh_path = toolchain.status(ManagedTool::OpenSsh).executable;
-    let server_package_dir = default_server_package_dir().map_err(|err| err.message)?;
-    let key_path = prepare_vendor_ssh_key(&server_package_dir).map_err(command_error_message)?;
-    Ok(OpenSshRunner::new(OpenSshTarget::new(
-        ssh_path, key_path, "dune", host,
-    )))
+    vendor_guest_runner(ssh_path, host)
 }
 
 fn is_alpine_remote_kind(server_type: &str) -> bool {
@@ -2512,10 +2541,7 @@ fn tunnel_target(request: &ServerTunnelStartRequest) -> Result<OpenSshTarget, St
             if host.is_empty() {
                 return Err("Remote Alpine guest IP is required.".to_string());
             }
-            let server_package_dir = default_server_package_dir().map_err(|err| err.message)?;
-            let key_path =
-                prepare_vendor_ssh_key(&server_package_dir).map_err(command_error_message)?;
-            Ok(OpenSshTarget::new(ssh_path, key_path, "dune", host))
+            vendor_guest_target(ssh_path, host)
         }
         "hyperv" => {
             let vm_name = request
@@ -2542,10 +2568,7 @@ fn tunnel_target(request: &ServerTunnelStartRequest) -> Result<OpenSshTarget, St
                     candidate.vm.name
                 ));
             }
-            let server_package_dir = default_server_package_dir().map_err(|err| err.message)?;
-            let key_path =
-                prepare_vendor_ssh_key(&server_package_dir).map_err(command_error_message)?;
-            Ok(OpenSshTarget::new(ssh_path, key_path, "dune", host))
+            vendor_guest_target(ssh_path, host)
         }
         other => Err(format!("Unsupported tunnel server kind: {other}")),
     }
@@ -2642,11 +2665,7 @@ fn local_hyperv_runner(
         .install(ManagedTool::OpenSsh, false, None)
         .map_err(|err| err.message)?;
     let ssh_path = toolchain.status(ManagedTool::OpenSsh).executable;
-    let server_package_dir = default_server_package_dir().map_err(|err| err.message)?;
-    let key_path = prepare_vendor_ssh_key(&server_package_dir).map_err(command_error_message)?;
-    Ok(OpenSshRunner::new(OpenSshTarget::new(
-        ssh_path, key_path, "dune", ip,
-    )))
+    vendor_guest_runner(ssh_path, ip)
 }
 
 fn generate_ubuntu_ssh_key_inner(

@@ -126,6 +126,8 @@ where
             return Err(failure("Battlegroup image version file was empty"));
         }
 
+        self.sync_existing_postgres_superuser_password(namespace, battlegroup_name)?;
+
         let command = format!(
             "sudo kubectl get battlegroup {} -n {} -o json",
             sh_single_quoted(battlegroup_name),
@@ -160,6 +162,28 @@ where
         script.push_str("set -eu\n");
         script.push_str(&shell_value("NS", namespace));
         script.push_str(APPLY_DEFAULT_SETTINGS_SCRIPT);
+        self.run_phase(&script)?;
+        Ok(())
+    }
+}
+
+impl<R> SshGuestBootstrapProvider<R>
+where
+    R: RemoteCommandRunner,
+{
+    fn sync_existing_postgres_superuser_password(
+        &self,
+        namespace: &str,
+        battlegroup_name: &str,
+    ) -> CommandResult<()> {
+        validate_kube_arg(namespace, "namespace")?;
+        validate_kube_arg(battlegroup_name, "battlegroup name")?;
+
+        let mut script = String::new();
+        script.push_str("set -eu\n");
+        script.push_str(&shell_value("NS", namespace));
+        script.push_str(&shell_value("BG", battlegroup_name));
+        script.push_str(SYNC_POSTGRES_SUPERUSER_PASSWORD_SCRIPT);
         self.run_phase(&script)?;
         Ok(())
     }
@@ -488,6 +512,41 @@ fi
 cat "$version_file"
 "#;
 
+const SYNC_POSTGRES_SUPERUSER_PASSWORD_SCRIPT: &str = r#"
+DDEP="$BG-db-dbdepl"
+if ! sudo kubectl get databasedeployment "$DDEP" -n "$NS" >/dev/null 2>&1; then
+  DDEP=$(sudo kubectl get databasedeployments -n "$NS" --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null | awk -v bg="$BG" '$1 ~ "^" bg ".*dbdepl$" { print $1; exit }' || true)
+fi
+if [ -z "$DDEP" ]; then
+  echo "No existing database deployment found for $BG; skipping Postgres password sync." >&2
+  exit 0
+fi
+
+DBPOD="$DDEP-sts-0"
+if ! sudo kubectl get pod "$DBPOD" -n "$NS" >/dev/null 2>&1; then
+  echo "No running database pod found for $DDEP; skipping Postgres password sync." >&2
+  exit 0
+fi
+
+SUPER_PASSWORD=$(sudo kubectl get databasedeployment "$DDEP" -n "$NS" -o jsonpath='{.spec.superPassword}' 2>/dev/null || true)
+if [ -z "$SUPER_PASSWORD" ]; then
+  echo "Database deployment $DDEP has no superPassword; skipping Postgres password sync." >&2
+  exit 0
+fi
+
+SUPER_USER=$(sudo kubectl get databasedeployment "$DDEP" -n "$NS" -o jsonpath='{.spec.superUser}' 2>/dev/null || true)
+DB_PORT=$(sudo kubectl get databasedeployment "$DDEP" -n "$NS" -o jsonpath='{.spec.port}' 2>/dev/null || true)
+if [ -z "$SUPER_USER" ]; then SUPER_USER=postgres; fi
+if [ -z "$DB_PORT" ]; then DB_PORT=15432; fi
+
+ESCAPED_PASSWORD=$(printf '%s' "$SUPER_PASSWORD" | sed "s/'/''/g")
+ESCAPED_USER=$(printf '%s' "$SUPER_USER" | sed 's/"/""/g')
+printf "ALTER ROLE \"%s\" WITH PASSWORD '%s';\n" "$ESCAPED_USER" "$ESCAPED_PASSWORD" |
+  sudo kubectl exec -i -n "$NS" "$DBPOD" -- \
+    psql -h 127.0.0.1 -p "$DB_PORT" -U "$SUPER_USER" -d postgres -v ON_ERROR_STOP=1 >/dev/null
+echo "Postgres superuser password is aligned with database deployment $DDEP." >&2
+"#;
+
 const APPLY_DEFAULT_SETTINGS_SCRIPT: &str = r#"
 DOWNLOAD_PATH=/home/dune/.dune/download
 config_dir="$DOWNLOAD_PATH/scripts/setup/config"
@@ -715,6 +774,7 @@ mod tests {
     fn battlegroup_image_patch_uses_rust_built_json_patch_without_jq() {
         let remote = MockRemote::with_outputs([
             "1952287-0-shipping",
+            "",
             r#"{
               "metadata":{"name":"sh-host-abcdef"},
               "spec":{
@@ -735,11 +795,13 @@ mod tests {
 
         let scripts = scripts.borrow();
         assert!(scripts[0].contains("version.txt"));
-        assert!(scripts[1].contains("kubectl get battlegroup"));
-        assert!(scripts[2].contains("kubectl patch battlegroup"));
-        assert!(scripts[2].contains("--type=json"));
-        assert!(scripts[2].contains("1952287-0-shipping"));
-        assert!(scripts[2].contains("seabass-server-gateway"));
+        assert!(scripts[1].contains("ALTER ROLE"));
+        assert!(scripts[1].contains("superPassword"));
+        assert!(scripts[2].contains("kubectl get battlegroup"));
+        assert!(scripts[3].contains("kubectl patch battlegroup"));
+        assert!(scripts[3].contains("--type=json"));
+        assert!(scripts[3].contains("1952287-0-shipping"));
+        assert!(scripts[3].contains("seabass-server-gateway"));
         assert!(!scripts.join("\n").contains("jq"));
     }
 

@@ -562,10 +562,48 @@ fn default_runtime_root() -> CommandResult<PathBuf> {
     Ok(current)
 }
 
-/// Copies the vendor SSH key to a temporary path and restricts its ACL for OpenSSH.
+/// Copies the packaged bootstrap SSH key to a temporary path and restricts its ACL for OpenSSH.
 pub fn prepare_vendor_ssh_key(server_package_dir: impl AsRef<Path>) -> CommandResult<PathBuf> {
     let layout = detect_server_package_layout(server_package_dir)?;
-    let source = layout.ssh_key;
+    prepare_restricted_ssh_key_copy(&layout.ssh_key)
+}
+
+/// Copies usable vendor SSH key candidates to temporary paths with OpenSSH-compatible ACLs.
+///
+/// Current `battlegroup-management` packages rotate the public bootstrap key into
+/// `%LOCALAPPDATA%\DuneAwakeningServer\sshKey` during vendor setup. Existing VMs
+/// may therefore authenticate with that active key, while fresh imported VMs
+/// still authenticate with the packaged bootstrap key.
+pub fn prepare_vendor_ssh_key_candidates(
+    server_package_dir: impl AsRef<Path>,
+) -> CommandResult<Vec<PathBuf>> {
+    let layout = detect_server_package_layout(server_package_dir)?;
+    let mut sources = Vec::new();
+    if layout.layout == ServerPackageLayout::BattlegroupManagement {
+        if let Some(active_key) = vendor_active_ssh_key_path().filter(|path| path.is_file()) {
+            sources.push(active_key);
+        }
+    }
+    sources.push(layout.ssh_key);
+    sources.dedup();
+
+    let mut candidates = Vec::with_capacity(sources.len());
+    for source in sources {
+        candidates.push(prepare_restricted_ssh_key_copy(&source)?);
+    }
+    Ok(candidates)
+}
+
+fn vendor_active_ssh_key_path() -> Option<PathBuf> {
+    let local_app_data = env::var_os("LOCALAPPDATA")?;
+    Some(
+        PathBuf::from(local_app_data)
+            .join("DuneAwakeningServer")
+            .join("sshKey"),
+    )
+}
+
+fn prepare_restricted_ssh_key_copy(source: &Path) -> CommandResult<PathBuf> {
     if !source.is_file() {
         return Err(failure(format!(
             "Vendor SSH key was not found: {}",

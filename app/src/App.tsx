@@ -492,16 +492,19 @@ type SetupForm = {
   saveRemoteServer: boolean;
 };
 
+const defaultHyperVVmName = "dune-awakening";
+const defaultHyperVSwitchName = "DuneAwakeningServerSwitch";
+
 const defaultForm: SetupForm = {
   setupTarget: "hyperv",
   vmDestination: "",
-  vmName: "dune-server",
+  vmName: defaultHyperVVmName,
   diskGb: "100",
   vmMemoryGb: "",
   processorCount: "4",
   enableSwap: false,
   networkMode: "static",
-  switchName: "",
+  switchName: defaultHyperVSwitchName,
   adapterName: "",
   staticIp: "",
   gateway: "",
@@ -548,7 +551,7 @@ const defaultRemoteAttachForm: RemoteAttachForm = {
 };
 
 const defaultLocalHyperVAttachForm: LocalHyperVAttachForm = {
-  vmName: "dune-server",
+  vmName: defaultHyperVVmName,
   staticIp: "",
 };
 
@@ -678,17 +681,15 @@ export function App() {
   };
   const updateServerPackage = async () => {
     setServerPackageCheckStatus("updating");
-    appendInitRow(log.info("server-package", "Updating Dune server package."));
     try {
       const status = await invoke<ServerPackageStatus>("update_server_package");
       setServerPackageStatus(status);
       setServerPackageCheckStatus(
         !status.complete ? "missing" : status.updateAvailable ? "available" : "current",
       );
-      appendInitRow(log.info("server-package", status.message));
     } catch (err) {
       setServerPackageCheckStatus("failed");
-      appendInitRow(log.error("server-package", errorMessage(err)));
+      appendSetupRow(log.error("server-package", errorMessage(err)));
     }
   };
   const installAppUpdate = async () => {
@@ -752,7 +753,7 @@ export function App() {
         setForm((current) => ({
           ...current,
           adapterName: current.adapterName || first.name,
-          switchName: current.switchName || first.existingExternalSwitch || first.name,
+          switchName: current.switchName || first.existingExternalSwitch || defaultHyperVSwitchName,
           staticIp: current.staticIp || first.suggestedIpv4Address,
           playerIp: current.playerIp || (current.playerIpMode === "external" && environment.externalIp
             ? environment.externalIp
@@ -3987,7 +3988,7 @@ function InstallControls({
                     const adapter = networkAdapters.find((candidate) => candidate.name === value);
                     if (!adapter) return;
                     update("adapterName", value);
-                    update("switchName", adapter.existingExternalSwitch || adapter.name);
+                    update("switchName", adapter.existingExternalSwitch || defaultHyperVSwitchName);
                     update("staticIp", adapter.suggestedIpv4Address);
                     update(
                       "playerIp",
@@ -5963,7 +5964,7 @@ function LocalHyperVAttachDialog({
               value={form.vmName}
               disabled={running}
               onChange={(event) => update("vmName", event.target.value)}
-              placeholder="dune-server"
+              placeholder={defaultHyperVVmName}
             />
           </label>
           <label>
