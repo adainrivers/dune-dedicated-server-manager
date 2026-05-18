@@ -1,0 +1,17 @@
+.git/
+.github/
+target/
+crates/**/target/
+app/src-tauri/target/
+app/node_modules/
+app/dist/
+app/src-tauri/gen/
+app/steamcmd/
+app/dune-server/
+app/vm/
+app/vm-*/
+vm/
+.tmp/
+*.log
+.env
+.env.*

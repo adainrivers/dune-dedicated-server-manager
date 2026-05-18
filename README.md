@@ -1,6 +1,6 @@
 # Dune Dedicated Server Manager
 
-A Windows-first manager for the Dune Awakening Playtest dedicated server.
+A Windows-first manager for the Dune Awakening Playtest dedicated server, with an experimental Linux AppImage build for remote-server workflows.
 
 ![Dune Dedicated Server Manager](images/screenshot.png)
 
@@ -21,6 +21,8 @@ More management features coming soon.
 3. Start Dune Dedicated Server Manager from the Start menu or installed shortcut.
 4. Approve the Windows administrator prompt when using local Hyper-V setup.
 5. Create a new server from the app.
+
+Linux AppImage builds are currently intended for testing and remote Ubuntu or Proxmox management. Local Hyper-V setup remains Windows-only.
 
 The app guides you through detecting the host, choosing a server layout, entering your Self-Host Service Token, and starting provisioning.
 
