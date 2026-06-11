@@ -224,24 +224,58 @@ pub async fn get_config(State(state): State<AppState>) -> Result<impl IntoRespon
             .map(|v| v != env.welcome_message)
             .unwrap_or(false);
 
+    // Return the SAVED (desired) config, falling back to the running `env`
+    // snapshot only for fields the operator has never set. Previously every
+    // field was read straight from `env` (frozen at service start), so a saved
+    // change — e.g. turning Auto Update off — visually reverted on the next
+    // load until a restart (#25). `restart_required` above still tells the UI
+    // the running scheduler hasn't picked the change up yet.
+    let welcome_actions_response = stored_welcome_actions_json
+        .clone()
+        .or_else(|| stored_welcome_items_json.clone())
+        .unwrap_or_else(|| env.welcome_package_actions_json.clone());
+    // backup_cron needs care: a present-but-empty row means "explicitly cleared"
+    // (backups disabled), which must NOT fall back to the running value. The
+    // filtered `stored_backup_cron` collapses cleared and never-set together, so
+    // re-read the raw row to tell them apart.
+    let backup_cron_response = match state.store.get_config("backup_cron")? {
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        None => env.backup_cron_raw.clone(),
+    };
+
     Ok(Json(ConfigResponse {
-        restart_hour: env.restart_hour,
-        restart_minute: env.restart_minute,
-        restart_warning_frequency_secs: env.restart_warning_frequency_secs,
-        restart_warning_duration_secs: env.restart_warning_duration_secs,
-        update_lead_secs: env.update_lead_secs,
-        restart_tz: env.restart_tz.name().to_string(),
-        restart_enabled: env.restart_enabled,
-        update_enabled: env.update_enabled,
-        backup_enabled: env.backup_enabled,
-        backup_cron: env.backup_cron_raw.clone(),
-        welcome_message_enabled: env.welcome_message_enabled,
-        welcome_package_enabled: env.welcome_package_enabled,
+        restart_hour: stored_hour.unwrap_or(env.restart_hour),
+        restart_minute: stored_minute.unwrap_or(env.restart_minute),
+        restart_warning_frequency_secs: stored_freq
+            .unwrap_or(env.restart_warning_frequency_secs),
+        restart_warning_duration_secs: stored_dur.unwrap_or(env.restart_warning_duration_secs),
+        update_lead_secs: stored_lead.unwrap_or(env.update_lead_secs),
+        restart_tz: stored_tz
+            .clone()
+            .unwrap_or_else(|| env.restart_tz.name().to_string()),
+        restart_enabled: stored_restart_enabled.unwrap_or(env.restart_enabled),
+        update_enabled: stored_update_enabled.unwrap_or(env.update_enabled),
+        backup_enabled: stored_backup_enabled.unwrap_or(env.backup_enabled),
+        backup_cron: backup_cron_response,
+        welcome_message_enabled: stored_welcome_message_enabled
+            .unwrap_or(env.welcome_message_enabled),
+        welcome_package_enabled: stored_welcome_enabled.unwrap_or(env.welcome_package_enabled),
         welcome_package_version: env.welcome_package_version.clone(),
-        welcome_package_actions_json: env.welcome_package_actions_json.clone(),
-        welcome_package_items_json: env.welcome_package_actions_json.clone(),
-        welcome_whisper_source_player: env.welcome_whisper_source_player.clone(),
-        welcome_message: env.welcome_message.clone(),
+        welcome_package_actions_json: welcome_actions_response.clone(),
+        welcome_package_items_json: welcome_actions_response,
+        welcome_whisper_source_player: stored_welcome_whisper_source
+            .clone()
+            .unwrap_or_else(|| env.welcome_whisper_source_player.clone()),
+        welcome_message: stored_welcome_message
+            .clone()
+            .unwrap_or_else(|| env.welcome_message.clone()),
         restart_required,
     }))
 }

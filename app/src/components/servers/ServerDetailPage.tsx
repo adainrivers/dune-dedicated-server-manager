@@ -10,7 +10,11 @@ import type { LogRow } from "../../types/log";
 import type { CustomTunnelStartRequest, ServerTunnelStartRequest, ServerTunnelStatus } from "../../types/tunnel";
 import type { ServerSubPage } from "../../types/ui";
 import { isManagementSubPage } from "../../types/ui";
-import { remoteServerDefaultUser, resolveServerStatus } from "../../utils/remote-server";
+import {
+  isBattlegroupStarted,
+  remoteServerDefaultUser,
+  resolveServerStatus,
+} from "../../utils/remote-server";
 import ActionButton from "../ui/ActionButton";
 import StatusPill from "../ui/StatusPill";
 import ServerDashboard from "./ServerDashboard";
@@ -194,7 +198,15 @@ export default function ServerDetailPage(props: ServerDetailPageProps) {
             <>
               <Tabs.Content value="users" className="server-detail-tab-content">
                 <ManagementContent tunnelState={tunnelState} tunnelId={tunnelId}>
-                  {(id) => <UsersTab tunnelId={id} onSwitchToAdmin={goToAdmin} />}
+                  {(id) => (
+                    <UsersTab
+                      tunnelId={id}
+                      serverReachable={
+                        !!liveStatus && isBattlegroupStarted(liveStatus.battlegroup)
+                      }
+                      onSwitchToAdmin={goToAdmin}
+                    />
+                  )}
                 </ManagementContent>
               </Tabs.Content>
               <Tabs.Content value="admin" className="server-detail-tab-content">

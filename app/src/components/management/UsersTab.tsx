@@ -29,10 +29,21 @@ function formatLastSeen(raw: string): string {
 
 export type UsersTabProps = {
   tunnelId: string;
+  /**
+   * Whether the BattleGroup is up and the player query can succeed. When false
+   * (BG stopped/offline) we stop the initial load, debounced search, and the
+   * auto-refresh poll — otherwise each poll hangs on an unavailable endpoint
+   * (up to the tunnel timeout) and stacks up, freezing the screen (#25).
+   */
+  serverReachable: boolean;
   onSwitchToAdmin: (prefill: AdminTabPrefill) => void;
 };
 
-export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
+export default function UsersTab({
+  tunnelId,
+  serverReachable,
+  onSwitchToAdmin,
+}: UsersTabProps) {
   const [users, setUsers] = useState<PlayerDto[]>([]);
   const [query, setQuery] = useState("");
   const [onlineOnly, setOnlineOnly] = useState(false);
@@ -57,26 +68,29 @@ export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
   );
 
   useEffect(() => {
+    if (!serverReachable) return;
     void reload("");
-  }, [reload]);
+  }, [reload, serverReachable]);
 
   useEffect(() => {
+    if (!serverReachable) return;
     const handle = setTimeout(() => {
       void reload(query.trim());
     }, 300);
     return () => clearTimeout(handle);
-  }, [query, reload]);
+  }, [query, reload, serverReachable]);
 
   // Poll for live player-status changes. Without this the list only refreshed
   // on mount / manual click, so logins and logouts went unseen until the app
-  // was reopened (#13). Toggleable per #14; on by default.
+  // was reopened (#13). Toggleable per #14; on by default. Gated on
+  // serverReachable so a stopped BattleGroup doesn't get polled (#25).
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefresh || !serverReachable) return;
     const handle = setInterval(() => {
       void reload(query.trim());
     }, 5000);
     return () => clearInterval(handle);
-  }, [autoRefresh, query, reload]);
+  }, [autoRefresh, query, reload, serverReachable]);
 
   const visible = useMemo(
     () => (onlineOnly ? users.filter((u) => u.online.toLowerCase() === "online") : users),
@@ -90,6 +104,7 @@ export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
           placeholder="Search name or FLS id…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          disabled={!serverReachable}
           style={{ flex: "1 1 280px", minWidth: 0 }}
         />
         <Flex align="center" gap="2">
@@ -104,7 +119,7 @@ export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
           size="1"
           variant="ghost"
           onClick={() => void reload(query.trim())}
-          disabled={busy}
+          disabled={busy || !serverReachable}
           style={{ minWidth: 64, justifyContent: "center" }}
         >
           {busy ? "Loading…" : "Refresh"}
@@ -130,6 +145,14 @@ export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
         </Text>
       ) : null}
 
+      {!serverReachable ? (
+        <Box className="server-error">
+          <Text size="2" color="gray">
+            The BattleGroup is offline — player data isn&apos;t available. Auto-refresh is
+            paused and resumes automatically when the server is back up.
+          </Text>
+        </Box>
+      ) : (
       <Table.Root variant="surface" size="1">
         <Table.Header>
           <Table.Row>
@@ -232,6 +255,7 @@ export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
           ) : null}
         </Table.Body>
       </Table.Root>
+      )}
     </Box>
   );
 }
