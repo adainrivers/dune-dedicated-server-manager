@@ -111,8 +111,35 @@ async fn apply_due_update(ctx: &TaskCtx, pending: PendingUpdateRecord) -> Result
     backup_one(ctx, &pending.battlegroup).await?;
 
     ctx.log_info("running vendor battlegroup update")?;
-    ctx.env.bg_cli.update().await?;
-    ctx.log_info("vendor battlegroup update completed")?;
+    let update_result = ctx.env.bg_cli.update().await;
+
+    // Issue #24: the vendor `battlegroup update` script can exit non-zero from a
+    // benign final `ln -s` (the symlink already exists) even though the update
+    // applied — which surfaces to the operator as a failed update. Verify STATE
+    // rather than trusting the exit code (the same approach used for status in
+    // #20): re-read the live BattleGroup version and the on-disk Steam build, and
+    // if the update actually landed, treat the run as success and surface the
+    // vendor's noisy exit only as a warning. A run that did NOT advance the live
+    // version is a genuine failure and still propagates.
+    let post_doc = bg::bg_json(&ctx.env.kubectl, &pending.namespace, &pending.battlegroup).await?;
+    let post_live = steam::extract_live_version(&post_doc);
+    let post_local_build = ctx.env.steamcmd.local_build().await?;
+    let post_downloaded = ctx.env.steamcmd.downloaded_version().await?;
+    let applied = update_already_applied(
+        post_local_build.as_deref(),
+        pending.latest_steam_build.as_deref(),
+        post_live.as_deref(),
+        post_downloaded.as_deref(),
+    );
+    match (update_result, applied) {
+        (Ok(()), _) => ctx.log_info("vendor battlegroup update completed")?,
+        (Err(err), true) => ctx.log_warn(&format!(
+            "vendor battlegroup update exited with an error but the update applied \
+             (live={}); treating as success per issue #24: {err:#}",
+            post_live.as_deref().unwrap_or("unknown")
+        ))?,
+        (Err(err), false) => return Err(err),
+    }
     ctx.store.clear_pending_update()?;
 
     if let Err(err) = ctx
