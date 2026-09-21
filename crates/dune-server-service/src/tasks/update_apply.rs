@@ -69,16 +69,8 @@ async fn apply_due_update(ctx: &TaskCtx, pending: PendingUpdateRecord) -> Result
         pending.live_version.as_deref().unwrap_or("unknown")
     ))?;
 
-    let bg_doc = bg::bg_json(&ctx.env.kubectl, &pending.namespace, &pending.battlegroup).await?;
-    let current_live_version = steam::extract_live_version(&bg_doc);
-    let downloaded_version = ctx.env.steamcmd.downloaded_version().await?;
-    let local_build = ctx.env.steamcmd.local_build().await?;
-    if update_already_applied(
-        local_build.as_deref(),
-        pending.latest_steam_build.as_deref(),
-        current_live_version.as_deref(),
-        downloaded_version.as_deref(),
-    ) {
+    if pending_update_is_applied(ctx, &pending).await? {
+        let downloaded_version = ctx.env.steamcmd.downloaded_version().await?;
         let applied = downloaded_version.as_deref().unwrap_or("unknown");
         ctx.log_info(&format!(
             "pending update already applied to live BattleGroup version {applied}; clearing pending update"
@@ -108,10 +100,18 @@ async fn apply_due_update(ctx: &TaskCtx, pending: PendingUpdateRecord) -> Result
     }
 
     ctx.log_info("taking pre-update database backup")?;
-    backup_one(ctx, &pending.battlegroup).await?;
+    backup_one(ctx, &pending).await?;
 
     ctx.log_info("running vendor battlegroup update")?;
-    ctx.env.bg_cli.update().await?;
+    if let Err(err) = ctx.env.bg_cli.update().await {
+        if pending_update_is_applied(ctx, &pending).await? {
+            ctx.log_warn(&format!(
+                "vendor battlegroup update exited with an error after applying the requested build; verified live state and continuing: {err:#}"
+            ))?;
+        } else {
+            return Err(err);
+        }
+    }
     ctx.log_info("vendor battlegroup update completed")?;
     ctx.store.clear_pending_update()?;
 
@@ -130,10 +130,26 @@ async fn apply_due_update(ctx: &TaskCtx, pending: PendingUpdateRecord) -> Result
     Ok(TaskOutcome::Done)
 }
 
-async fn backup_one(ctx: &TaskCtx, bg_name: &str) -> Result<()> {
-    let stamp = Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    let backup_name = format!("{}-pre-update-{}.backup", bg_name, stamp);
-    crate::tasks::backup::run_backup_and_verify(ctx, bg_name, &backup_name).await
+async fn pending_update_is_applied(ctx: &TaskCtx, pending: &PendingUpdateRecord) -> Result<bool> {
+    let bg_doc = bg::bg_json(&ctx.env.kubectl, &pending.namespace, &pending.battlegroup).await?;
+    let current_live_version = steam::extract_live_version(&bg_doc);
+    let downloaded_version = ctx.env.steamcmd.downloaded_version().await?;
+    let local_build = ctx.env.steamcmd.local_build().await?;
+    Ok(update_already_applied(
+        local_build.as_deref(),
+        pending.latest_steam_build.as_deref(),
+        current_live_version.as_deref(),
+        downloaded_version.as_deref(),
+    ))
+}
+
+async fn backup_one(ctx: &TaskCtx, pending: &PendingUpdateRecord) -> Result<()> {
+    let created = chrono::DateTime::from_timestamp(pending.created_ts, 0).unwrap_or_else(Utc::now);
+    let stamp = created.format("%Y%m%d-%H%M%S");
+    let backup_name = format!("{}-pre-update-{stamp}.backup", pending.battlegroup);
+    crate::tasks::backup::run_backup_and_verify(ctx, &pending.battlegroup, &backup_name)
+        .await
+        .map(|_| ())
 }
 
 /// Decide whether a pending update is already satisfied and can be cleared
@@ -183,10 +199,10 @@ mod tests {
     #[test]
     fn not_applied_when_download_still_behind_latest() {
         assert!(!update_already_applied(
-            Some("23510000"),            // local build still old
-            Some("23528481"),            // latest steam build
-            Some("1973075-0-shipping"),  // live == downloaded because version.txt
-            Some("1973075-0-shipping"),  // hasn't been refreshed by the download step yet
+            Some("23510000"),           // local build still old
+            Some("23528481"),           // latest steam build
+            Some("1973075-0-shipping"), // live == downloaded because version.txt
+            Some("1973075-0-shipping"), // hasn't been refreshed by the download step yet
         ));
     }
 
@@ -217,7 +233,12 @@ mod tests {
     // Missing build/version data is never treated as applied.
     #[test]
     fn not_applied_when_data_missing() {
-        assert!(!update_already_applied(None, Some("23528481"), Some("x"), Some("x")));
+        assert!(!update_already_applied(
+            None,
+            Some("23528481"),
+            Some("x"),
+            Some("x")
+        ));
         assert!(!update_already_applied(
             Some("23528481"),
             None,
