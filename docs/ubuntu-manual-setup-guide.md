@@ -734,8 +734,8 @@ PY
 
 chmod +x setup.sh setup/k3s.sh setup/helper.sh setup/experimental_swap.sh battlegroup.sh
 
-if grep -RIn --exclude='*.ubuntu-patch.bak' 'rc-service\|rc-update\|openrc.k3s' setup; then
-  echo "Some Alpine/OpenRC references remain (listed above). Read the note below before running setup.sh."
+if grep -RIn --exclude='*.ubuntu-patch.bak' --exclude='vm_ip.sh' 'rc-service\|rc-update\|openrc.k3s' setup; then
+  echo "Some Alpine/OpenRC references remain (listed above). Read the notes below before running setup.sh."
 else
   echo "Vendor scripts are patched for Ubuntu."
 fi
@@ -743,12 +743,16 @@ fi
 
 This check runs in your login shell, so it only prints a message. It does not stop anything or close your SSH session.
 
-Newer server packages can add scripts that this patch does not cover yet, such as `setup/vm_ip.sh`. If the check lists lines from such a file, look at each one before running `setup.sh`. Ubuntu has no `rc-service` or `rc-update`, so the matching systemd commands are:
+`setup/vm_ip.sh` is left out on purpose. It was added in the June 2026 server package and only serves the `battlegroup change-vm-ip` command, which sets the network address of the Alpine-based Hyper-V VM. `setup.sh` never runs it, so leave it unpatched. On Ubuntu, do not run `battlegroup change-vm-ip` at all. It overwrites `/etc/network/interfaces`, flushes the network interface, and restarts networking the Alpine way, which can cut a remote server off the network. To change the IP that players connect to, use your provider's network settings and the steps in section 12.
+
+Server updates replace the vendor scripts with fresh copies. For example, the June 2026 package brought back the OpenRC calls in `setup/k3s.sh`. The patch above is safe to run again, so rerun this section before you run `setup.sh` again on an updated host.
+
+If the check lists other lines, a newer server package has added OpenRC calls that this patch does not cover yet. Ubuntu has no `rc-service` or `rc-update`, so the matching systemd commands are:
 
 - `rc-service NAME start|stop|restart` becomes `systemctl start|stop|restart NAME`
 - `rc-update add NAME` becomes `systemctl enable NAME`
 
-Change a line only when `setup.sh` actually runs it on your host. Lines that apply only to the Alpine-based Hyper-V VM can stay as they are.
+Change a line only when `setup.sh` actually runs it on your host.
 
 ## 12. Run the vendor setup script
 
