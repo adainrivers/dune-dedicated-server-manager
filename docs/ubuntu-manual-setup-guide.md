@@ -1007,6 +1007,23 @@ Update from Steam:
 sudo -iu dune /home/dune/.dune/bin/battlegroup update
 ```
 
+After an update, check that no pods are stuck in `Pending`. See "Pods stay Pending after a server update" under Troubleshooting.
+
+Back up the game database:
+
+```sh
+sudo -iu dune /home/dune/.dune/bin/battlegroup backup my-backup-name
+```
+
+This dumps only the PostgreSQL game database. It does not back up Kubernetes secrets, RabbitMQ, logs, or the rest of the server. Current server packages write the dump to `Saved/DatabaseDumps/<name>` on the game server's persistent volume, which is under `/var/lib/rancher/k3s/storage` with k3s local-path storage. Older packages wrote to `/funcom/artifacts/database-dumps/<battlegroup>/` instead. To find existing dumps:
+
+```sh
+sudo find /var/lib/rancher/k3s/storage /funcom/artifacts/database-dumps \
+  -name '*.backup' 2>/dev/null
+```
+
+Restoring a backup with `battlegroup import` overwrites the game database. Stop the BattleGroup first.
+
 Export logs:
 
 ```sh
@@ -1082,6 +1099,17 @@ sudo kubectl get pods -A
 sudo kubectl describe pod -n "$NS" POD_NAME
 sudo kubectl logs -n "$NS" POD_NAME --all-containers --tail=200
 ```
+
+Pods stay Pending after a server update:
+
+Server updates can add new map sets that pin pods to a custom `memory-focused-scheduler`. Fresh k3s hosts do not run that scheduler, so the new pods stay `Pending` with no node and no scheduling events, and players can get stuck in the travel queue. Check for scheduler references:
+
+```sh
+sudo kubectl get pods -n "$NS" --field-selector=status.phase=Pending \
+  -o custom-columns='NAME:.metadata.name,SCHEDULER:.spec.schedulerName,NODE:.spec.nodeName'
+```
+
+If any pod shows `memory-focused-scheduler`, rerun the "Remove any custom scheduler references" step from section 12. It re-reads the current set indices and removes the field from every set. The operator then moves the pending pods to the default scheduler without a full BattleGroup restart.
 
 Operators are not ready:
 

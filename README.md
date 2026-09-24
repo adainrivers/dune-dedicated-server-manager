@@ -11,13 +11,16 @@ configure Hyper-V, provision Ubuntu, or manage external tools such as SteamCMD.
 ## Features
 
 - Remote server profile management with SSH private-key authentication
-- BattleGroup status, start, stop, restart, and update controls
-- Component diagnostics, log viewing, and safe restart actions
-- Secure Director, File Browser, PostgreSQL, and PgHero access through local SSH tunnels
-- Bundled `dune-server-service` daemon for on-host scheduled maintenance (daily restarts with in-game warnings, automated backups, server update check + apply) — installed over SSH straight from the Management card
-- Admin console for in-game actions: item grants, vehicle spawns, skill/journey/XP tags, player lookup with live pawn location, and a logged history of every published command
-- Automated tasks tab with editable schedule settings (daily restart time, warning lead/frequency, update apply lead, IANA timezone) — saving auto-restarts the service so changes apply immediately
-- Welcome Package automation: a per-player onboarding chain (item grants, water refill, welcome whisper) driven by Postgres player detection, tracked in the management service's SQLite ledger, and configurable from the Welcome Package tab with both a visual editor and a raw JSON mode
+- **Dashboard**: BattleGroup status, start, stop, and restart controls, read from live Kubernetes state
+- **Update**: installed vs. available game build and a one-click server update
+- **Pods**: per-component health, live log tails, and safe per-pod restarts
+- Secure Director, File Browser, PostgreSQL, and PgHero access through local SSH tunnels, plus your own custom tunnels to any port on the host
+- Bundled `dune-server-service` daemon for on-host scheduled maintenance (daily restarts with in-game warnings, automated backups, server update check + apply), installed over SSH straight from the Management card on systemd (Ubuntu) and OpenRC (Alpine) hosts
+- **Users**: player list with online filter and auto-refresh, and a shortcut into the Admin tab for a selected player
+- **Admin**: console for in-game actions: item grants, service broadcasts, kicks, teleports, vehicle spawns, XP and skill changes, water refills, inventory and progression resets, player lookup with live pawn location, and a logged history of every published command
+- **Automated tasks**: separate enable switches for auto restart, auto update, and auto backup; editable schedules (daily restart time, warning lead/frequency, update apply lead, backup cron, IANA timezone); recent run history; and cleanup of finished database operations. Saving restarts the service so changes apply immediately
+- **Welcome Package**: automatically gives new players a set of backpack items (water containers arrive full) and an optional welcome whisper. Items are written directly to the game database, tracked in the management service's SQLite ledger, and failed deliveries can be retried. Configure it with a visual editor or raw JSON
+- In-app update check that shows the release notes before you install
 
 ![Admin tab — granting items to online players with a searchable Funcom item picker](images/ss-2.png)
 
@@ -35,11 +38,25 @@ After launching the app, add an existing server profile with its host, SSH user,
 and private key path, then refresh it to detect BattleGroups and management
 endpoints.
 
+The Users, Admin, Welcome Package, and Automated tasks tabs need the on-host
+management service. To install it, open the server's Management Service card
+and click **Install**.
+
+### After updating the app
+
+Most releases also update the on-host `dune-server-service`. After installing a
+new app version, open each server's Management Service card and click
+**Update** (it appears when the host service is older than the app). Each
+release's notes say whether this step is required.
+
 ## Managed Server Assumptions
 
 The target server must already be installed and reachable over SSH. The app
 expects the Dune Kubernetes resources and vendor management scripts to exist on
 the server before you add it.
+
+To set up a fresh Ubuntu host by hand, see the
+[Manual Ubuntu Server Setup Guide](docs/ubuntu-manual-setup-guide.md).
 
 Required player-facing/server ports depend on your own server deployment. A
 typical dedicated-server deployment uses:
