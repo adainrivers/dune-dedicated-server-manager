@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Box,
@@ -12,6 +12,7 @@ import {
 } from "@radix-ui/themes";
 
 import { managementApi } from "../../services/management";
+import { readUsersAutoRefresh, writeUsersAutoRefresh } from "../../services/storage";
 import type { PlayerDto } from "../../types/management";
 import { copyTextToClipboard } from "../../utils/clipboard";
 import { formatDateTime } from "../../utils/formatting";
@@ -29,19 +30,28 @@ function formatLastSeen(raw: string): string {
 
 export type UsersTabProps = {
   tunnelId: string;
+  /** True when the BattleGroup is known to be stopped; pauses polling. */
+  battlegroupStopped: boolean;
   onSwitchToAdmin: (prefill: AdminTabPrefill) => void;
 };
 
-export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
+export default function UsersTab({ tunnelId, battlegroupStopped, onSwitchToAdmin }: UsersTabProps) {
   const [users, setUsers] = useState<PlayerDto[]>([]);
   const [query, setQuery] = useState("");
   const [onlineOnly, setOnlineOnly] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoRefresh, setAutoRefreshState] = useState(readUsersAutoRefresh);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  const setAutoRefresh = useCallback((enabled: boolean) => {
+    setAutoRefreshState(enabled);
+    writeUsersAutoRefresh(enabled);
+  }, []);
 
   const reload = useCallback(
     async (q: string) => {
+      inFlight.current = true;
       setBusy(true);
       setError(null);
       try {
@@ -50,6 +60,7 @@ export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
       } catch (err) {
         setError(String(err));
       } finally {
+        inFlight.current = false;
         setBusy(false);
       }
     },
@@ -69,14 +80,18 @@ export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
 
   // Poll for live player-status changes. Without this the list only refreshed
   // on mount / manual click, so logins and logouts went unseen until the app
-  // was reopened (#13). Toggleable per #14; on by default.
+  // was reopened (#13). Toggleable per #14; on by default. Paused while the
+  // BattleGroup is stopped (the game DB is down, so every poll would just
+  // wait out a timeout) and skipped while a previous poll is in flight (#25).
+  const polling = autoRefresh && !battlegroupStopped;
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!polling) return;
     const handle = setInterval(() => {
+      if (inFlight.current) return;
       void reload(query.trim());
     }, 5000);
     return () => clearInterval(handle);
-  }, [autoRefresh, query, reload]);
+  }, [polling, query, reload]);
 
   const visible = useMemo(
     () => (onlineOnly ? users.filter((u) => u.online.toLowerCase() === "online") : users),
@@ -98,7 +113,12 @@ export default function UsersTab({ tunnelId, onSwitchToAdmin }: UsersTabProps) {
         </Flex>
         <Flex align="center" gap="2">
           <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-          <Text size="2">Auto-refresh</Text>
+          <Text size="2">
+            Auto-refresh
+            {autoRefresh && battlegroupStopped ? (
+              <Text color="gray"> (paused, BattleGroup stopped)</Text>
+            ) : null}
+          </Text>
         </Flex>
         <Button
           size="1"

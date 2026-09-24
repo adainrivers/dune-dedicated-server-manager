@@ -122,6 +122,7 @@ export function App() {
                   tunnels={tunnels.serverTunnels}
                   tunnelBusy={tunnels.serverTunnelBusy}
                   onRefresh={() => status.refreshRemoteServerStatus(activeServer)}
+                  onPollStatus={() => status.pollRemoteServerStatus(activeServer)}
                   onRemove={() => remoteServersHook.setRemoteServerToRemove(activeServer)}
                   onStartBattlegroup={() => status.runRemoteBattlegroupAction(activeServer, "start")}
                   onStopBattlegroup={() => status.runRemoteBattlegroupAction(activeServer, "stop")}

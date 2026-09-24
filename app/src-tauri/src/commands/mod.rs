@@ -1,4 +1,5 @@
 mod battlegroup;
+mod battlegroup_update;
 mod component;
 mod discovery;
 mod logs;
@@ -8,15 +9,17 @@ mod preflight;
 pub(crate) mod shared;
 mod status;
 mod status_data;
+mod status_disk;
 mod status_helpers;
 mod status_naming;
+mod status_pod_age;
 mod tunnel;
 mod tunnel_helpers;
 
 pub use battlegroup::{
     restart_remote_battlegroup, start_remote_battlegroup, stop_remote_battlegroup,
-    update_remote_battlegroup,
 };
+pub use battlegroup_update::update_remote_battlegroup;
 pub use component::{remote_component_log_tail, restart_remote_component};
 pub use discovery::detect_remote_ubuntu_servers;
 pub use logs::{get_logs_folder, record_operation_log};

@@ -80,8 +80,12 @@ pub struct RemoteBattlegroupStatus {
     pub phase: String,
     #[serde(default)]
     pub database_phase: String,
-    /// Wrapper's `Gateway` column. Kept under the old name for UI compatibility.
+    /// `status.serverGroupPhase`: aggregate phase of the map servers.
     pub server_group_phase: String,
+    /// `status.utilities.serverGateway.phase`: the ServerGateway's own health
+    /// (e.g. `Healthy`), which is what Funcom's tooling shows as "Gateway".
+    #[serde(default)]
+    pub gateway_phase: String,
     pub director_phase: String,
     #[serde(default)]
     pub uptime: String,
@@ -104,6 +108,17 @@ pub struct RemoteBattlegroupServerStat {
 pub struct RemoteServerStatus {
     pub battlegroup: RemoteBattlegroupStatus,
     pub package: RemoteServerPackageStatus,
+    /// Root and k3s storage filesystems; empty when `df` could not be read.
+    pub disks: Vec<RemoteDiskUsage>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDiskUsage {
+    pub mount: String,
+    pub total_kb: u64,
+    pub used_kb: u64,
+    pub available_kb: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

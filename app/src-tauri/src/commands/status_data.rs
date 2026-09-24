@@ -4,8 +4,10 @@ use dune_manager_core::orchestration::{RemoteCommandRunner, RusshRunner};
 use serde_json::Value;
 
 use crate::commands::shared::sh_single_quoted;
+use crate::commands::status_disk::read_disk_usage;
 use crate::commands::status_helpers::{pod_component, server_resource_components};
 use crate::commands::status_naming::friendly_map_name;
+use crate::commands::status_pod_age::read_server_pod_starts;
 use crate::dto::{
     RemoteBattlegroupServerStat, RemoteBattlegroupStatus, RemoteServerComponent,
     RemoteServerPackageStatus, RemoteServerStatus,
@@ -47,15 +49,18 @@ pub fn read_remote_server_status(
             "remote serverstats",
         )
         .unwrap_or_else(|_| Value::Null);
-    let battlegroup = battlegroup_status_from_json_with_stats(&bg, &stats).ok_or_else(|| {
+    let pod_starts = read_server_pod_starts(runner, namespace);
+    let battlegroup = battlegroup_status_from_json_full(&bg, &stats, &pod_starts).ok_or_else(|| {
         failure(format!(
             "BattleGroup `{battlegroup_name}` returned no status object yet (likely still initialising)"
         ))
     })?;
     let package = read_guest_package_status(runner, namespace, battlegroup_name)?;
+    let disks = read_disk_usage(runner);
     Ok(RemoteServerStatus {
         battlegroup,
         package,
+        disks,
     })
 }
 
@@ -63,9 +68,20 @@ pub fn read_remote_server_status(
 /// `RemoteBattlegroupStatus` and merges per-partition
 /// live data (players, gamePhase, ready) from a `kubectl get serverstats`
 /// JSON payload. Pass `Value::Null` when no stats are available.
+#[cfg(test)]
 pub(crate) fn battlegroup_status_from_json_with_stats(
     bg: &Value,
     serverstats: &Value,
+) -> Option<RemoteBattlegroupStatus> {
+    battlegroup_status_from_json_full(bg, serverstats, &std::collections::HashMap::new())
+}
+
+/// Same as `battlegroup_status_from_json_with_stats`, plus per-server pod
+/// start times (`partition index -> RFC 3339`) used for each row's age.
+pub(crate) fn battlegroup_status_from_json_full(
+    bg: &Value,
+    serverstats: &Value,
+    pod_starts: &std::collections::HashMap<u64, String>,
 ) -> Option<RemoteBattlegroupStatus> {
     bg.get("metadata")?.get("name")?.as_str()?;
     let spec = bg.get("spec").cloned().unwrap_or(Value::Null);
@@ -95,7 +111,7 @@ pub(crate) fn battlegroup_status_from_json_with_stats(
         .map(|servers| {
             servers
                 .iter()
-                .map(|s| server_stat_from_json(s, &bg_age, &stats_by_partition))
+                .map(|s| server_stat_from_json(s, &bg_age, &stats_by_partition, pod_starts))
                 .collect()
         })
         .unwrap_or_default();
@@ -115,6 +131,13 @@ pub(crate) fn battlegroup_status_from_json_with_stats(
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| string_field(&status, "directorPhase"));
+    let gateway_phase = status
+        .get("utilities")
+        .and_then(|u| u.get("serverGateway"))
+        .and_then(|g| g.get("phase"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_default();
     // Uptime: the CR doesn't expose a pre-formatted string anymore, so we
     // compute it from `status.startTimestamp` (the same field we use for
     // per-row age). Older operators that set a literal `uptime` string win.
@@ -130,6 +153,7 @@ pub(crate) fn battlegroup_status_from_json_with_stats(
         phase: string_field(&status, "phase"),
         database_phase,
         server_group_phase: string_field(&status, "serverGroupPhase"),
+        gateway_phase,
         director_phase,
         uptime,
         server_stats,
@@ -181,6 +205,7 @@ fn server_stat_from_json(
     server: &Value,
     bg_age: &str,
     stats_by_partition: &std::collections::HashMap<i64, PartitionStats>,
+    pod_starts: &std::collections::HashMap<u64, String>,
 ) -> RemoteBattlegroupServerStat {
     // The Funcom operator names this field `partitionMap` in the BattleGroup
     // CR's `status.servers[]` — confirmed against backed-up live CR YAML.
@@ -209,9 +234,12 @@ fn server_stat_from_json(
         _ => String::new(),
     };
     // The BG CR's status.servers[] entries don't carry a player count or
-    // age; we inherit the BG-level age and merge the per-partition player
-    // count from the matching ServerStats CR (keyed by partitionIndex).
+    // age. Age comes from the server's own pod start time when known (#21),
+    // else the BG-level age; the player count is merged from the matching
+    // ServerStats CR (keyed by partitionIndex).
     let age = if let Some(start) = server.get("startTimestamp").and_then(Value::as_str) {
+        format_age_since_iso(start)
+    } else if let Some(start) = partition_index.and_then(|idx| pod_starts.get(&idx)) {
         format_age_since_iso(start)
     } else {
         bg_age.to_string()
@@ -468,6 +496,48 @@ mod tests {
         assert_eq!(dto.server_group_phase, "Running");
         assert_eq!(dto.director_phase, "");
         assert_eq!(dto.uptime, "");
+    }
+
+    #[test]
+    fn gateway_phase_comes_from_server_gateway_not_server_group() {
+        // #21: shape from a backed-up live CR. The gateway reports Healthy
+        // while the map servers are still coming up.
+        let value = bg(
+            json!({"stop": false}),
+            json!({
+                "phase": "Healthy",
+                "serverGroupPhase": "Initializing",
+                "utilities": {"serverGateway": {"phase": "Healthy"}},
+            }),
+        );
+        let dto = bg_status(&value).expect("status maps");
+        assert_eq!(dto.gateway_phase, "Healthy");
+        assert_eq!(dto.server_group_phase, "Initializing");
+
+        let bare = bg(json!({}), json!({"phase": "Stopped"}));
+        assert_eq!(bg_status(&bare).expect("status maps").gateway_phase, "");
+    }
+
+    #[test]
+    fn server_row_age_prefers_its_own_pod_start_over_bg_start() {
+        // #21: a partition restarted 5 minutes ago must not show the BG age.
+        let pod_start = (chrono::Utc::now() - chrono::Duration::minutes(5)).to_rfc3339();
+        let value = bg(
+            json!({"stop": false}),
+            json!({
+                "phase": "Healthy",
+                "startTimestamp": "2020-01-01T00:00:00Z",
+                "servers": [
+                    {"partitionMap": "Survival_1", "partitionIndex": 31, "phase": "Running"},
+                    {"partitionMap": "Survival_1", "partitionIndex": 1, "phase": "Running"},
+                ],
+            }),
+        );
+        let pod_starts = std::collections::HashMap::from([(31u64, pod_start)]);
+        let dto =
+            battlegroup_status_from_json_full(&value, &Value::Null, &pod_starts).expect("maps");
+        assert_eq!(dto.server_stats[0].age, "5m");
+        assert_eq!(dto.server_stats[1].age, dto.uptime);
     }
 
     #[test]

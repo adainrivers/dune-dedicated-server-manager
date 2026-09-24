@@ -13,8 +13,10 @@ export type RemoteBattlegroupStatus = {
   stop: boolean;
   phase: string;
   databasePhase?: string;
-  /** Gateway phase column from the vendor wrapper. */
+  /** `status.serverGroupPhase`: aggregate phase of the map servers. */
   serverGroupPhase: string;
+  /** `status.utilities.serverGateway.phase`: the ServerGateway's own health. */
+  gatewayPhase?: string;
   directorPhase: string;
   uptime?: string;
   serverStats?: RemoteBattlegroupServerStat[];
@@ -31,6 +33,15 @@ export type RemoteBattlegroupServerStat = {
 export type RemoteServerStatus = {
   battlegroup: RemoteBattlegroupStatus;
   package: RemoteServerPackageStatus;
+  /** Root and k3s storage filesystems; empty when `df` could not be read. */
+  disks?: RemoteDiskUsage[];
+};
+
+export type RemoteDiskUsage = {
+  mount: string;
+  totalKb: number;
+  usedKb: number;
+  availableKb: number;
 };
 
 export type RemoteServerComponent = {

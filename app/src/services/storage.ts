@@ -6,6 +6,8 @@ import { SERVER_SUB_PAGES } from "../types/ui";
 const remoteServersStorageKey = "dune-manager.remote-servers";
 const activePageStorageKey = "dune-manager.active-page";
 const logSidebarStorageKey = "dune-manager.log-sidebar";
+const usersAutoRefreshStorageKey = "dune-manager.users-auto-refresh";
+const statusAutoRefreshStorageKey = "dune-manager.status-auto-refresh";
 
 export function isRemoteServerRecord(value: unknown): value is RemoteServerRecord {
   if (!value || typeof value !== "object") return false;
@@ -106,6 +108,25 @@ export function readLogSidebar(): PersistedLogSidebar {
 
 export function writeLogSidebar(state: PersistedLogSidebar): void {
   window.localStorage.setItem(logSidebarStorageKey, JSON.stringify(state));
+}
+
+// Users tab auto-refresh switch. Defaults to on; an explicit "off" survives
+// tab switches and app restarts (#25).
+export function readUsersAutoRefresh(): boolean {
+  return window.localStorage.getItem(usersAutoRefreshStorageKey) !== "off";
+}
+
+export function writeUsersAutoRefresh(enabled: boolean): void {
+  window.localStorage.setItem(usersAutoRefreshStorageKey, enabled ? "on" : "off");
+}
+
+// Server status auto-refresh switch (#22). Defaults to on.
+export function readStatusAutoRefresh(): boolean {
+  return window.localStorage.getItem(statusAutoRefreshStorageKey) !== "off";
+}
+
+export function writeStatusAutoRefresh(enabled: boolean): void {
+  window.localStorage.setItem(statusAutoRefreshStorageKey, enabled ? "on" : "off");
 }
 
 function customTunnelsKey(serverId: string): string {

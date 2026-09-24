@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   detectRemoteUbuntuServers,
@@ -39,6 +39,12 @@ export function useRemoteServerStatus({ appendLogRow, setRemoteServers }: UseRem
   const [remoteComponentLogs, setRemoteComponentLogs] = useState<Record<string, string>>({});
   const [remoteComponentLogBusy, setRemoteComponentLogBusy] = useState<Record<string, boolean>>({});
   const [remoteComponentRestartBusy, setRemoteComponentRestartBusy] = useState<Record<string, boolean>>({});
+  // Bumped when a full refresh or a BattleGroup action starts, so a quiet poll
+  // that was already in flight cannot overwrite the newer result (#22).
+  const statusEpoch = useRef<Record<string, number>>({});
+  const bumpStatusEpoch = (serverId: string) => {
+    statusEpoch.current[serverId] = (statusEpoch.current[serverId] ?? 0) + 1;
+  };
 
   const detectRemoteServerDetails = async (server: RemoteServerRecord): Promise<RemoteServerRecord> => {
     const detected = await detectRemoteUbuntuServers({
@@ -56,6 +62,7 @@ export function useRemoteServerStatus({ appendLogRow, setRemoteServers }: UseRem
 
   const refreshRemoteServerStatus = async (server: RemoteServerRecord) => {
     if (!server.host || !server.keyPath) return;
+    bumpStatusEpoch(server.id);
     setRemoteServerBusy((busy) => ({ ...busy, [server.id]: "Retrieving server information" }));
     setRemoteServerStatuses((statuses) => omitKey(statuses, server.id));
     setRemoteServerComponents((components) => omitKey(components, server.id));
@@ -110,6 +117,7 @@ export function useRemoteServerStatus({ appendLogRow, setRemoteServers }: UseRem
       update: ["Updating battlegroup", "Updating"],
     };
     const [busyText, verb] = verbs[action];
+    bumpStatusEpoch(server.id);
     setRemoteServerBusy((busy) => ({ ...busy, [server.id]: busyText }));
     appendLogRow(log.info("bg", `${verb} remote battlegroup.`, server.id));
     try {
@@ -147,6 +155,22 @@ export function useRemoteServerStatus({ appendLogRow, setRemoteServers }: UseRem
     }
   };
 
+  // Quiet status-only refresh for auto-refresh (#22). Unlike the full refresh
+  // it keeps the current view, sets no busy label, and writes no log line.
+  // Failures keep the last known state; a manual Refresh surfaces the error.
+  const pollRemoteServerStatus = async (server: RemoteServerRecord) => {
+    if (!server.host || !server.keyPath || !server.namespace || !server.battlegroupName) return;
+    const epoch = statusEpoch.current[server.id] ?? 0;
+    try {
+      const status = await getRemoteServerStatus(remoteServerActionRequest(server));
+      if ((statusEpoch.current[server.id] ?? 0) !== epoch) return;
+      setRemoteServerStatuses((statuses) => ({ ...statuses, [server.id]: status }));
+      setRemoteServerStatusErrors((errors) => omitKey(errors, server.id));
+    } catch {
+      // Keep the last known state.
+    }
+  };
+
   const clearStatusForServer = (serverId: string) => {
     setRemoteServerStatuses((statuses) => omitKey(statuses, serverId));
     setRemoteServerComponents((components) => omitKey(components, serverId));
@@ -170,6 +194,7 @@ export function useRemoteServerStatus({ appendLogRow, setRemoteServers }: UseRem
     setRemoteComponentRestartBusy,
     detectRemoteServerDetails,
     refreshRemoteServerStatus,
+    pollRemoteServerStatus,
     runRemoteBattlegroupAction,
     clearStatusForServer,
   };

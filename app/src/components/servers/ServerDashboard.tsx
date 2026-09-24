@@ -1,6 +1,6 @@
 import { Flex } from "@radix-ui/themes";
 
-import type { RemoteServerRecord, RemoteServerStatus } from "../../types/server";
+import type { RemoteDiskUsage, RemoteServerRecord, RemoteServerStatus } from "../../types/server";
 import type { CustomTunnelStartRequest, ServerTunnelStartRequest, ServerTunnelStatus } from "../../types/tunnel";
 import {
   isBattlegroupStarted,
@@ -8,8 +8,9 @@ import {
   phaseTone,
   remoteServerDefaultUser,
 } from "../../utils/remote-server";
+import { formatBytes } from "../../utils/formatting";
 import ActionButton from "../ui/ActionButton";
-import Metric from "../ui/Metric";
+import Metric, { type MetricTone } from "../ui/Metric";
 import ServerStatsTable from "./ServerStatsTable";
 import ServerTunnelControls from "./ServerTunnelControls";
 import CustomTunnelControls from "./CustomTunnelControls";
@@ -78,6 +79,11 @@ export default function ServerDashboard({
         />
         <Metric
           label="Gateway"
+          value={battlegroup?.gatewayPhase ?? ""}
+          tone={battlegroup ? phaseTone(battlegroup.gatewayPhase ?? "") : "muted"}
+        />
+        <Metric
+          label="Servers"
           value={battlegroup?.serverGroupPhase ?? ""}
           tone={battlegroup ? phaseTone(battlegroup.serverGroupPhase) : "muted"}
         />
@@ -87,6 +93,14 @@ export default function ServerDashboard({
           tone={battlegroup ? phaseTone(battlegroup.directorPhase) : "muted"}
         />
         <Metric label="Uptime" value={battlegroup?.uptime ?? ""} />
+        {(liveStatus?.disks ?? []).map((disk) => (
+          <Metric
+            key={disk.mount}
+            label={`Disk ${disk.mount}`}
+            value={diskValue(disk)}
+            tone={diskTone(disk)}
+          />
+        ))}
       </div>
 
       {battlegroup?.serverStats && battlegroup.serverStats.length > 0 ? (
@@ -172,4 +186,22 @@ export default function ServerDashboard({
       />
     </Flex>
   );
+}
+
+// Same capacity figure `df` reports: used / (used + available). Reserved
+// root blocks are excluded, so this is what actually runs out (#38).
+function diskPercent(disk: RemoteDiskUsage): number {
+  const usable = disk.usedKb + disk.availableKb;
+  return usable > 0 ? Math.round((disk.usedKb / usable) * 100) : 0;
+}
+
+function diskValue(disk: RemoteDiskUsage): string {
+  return `${diskPercent(disk)}%, ${formatBytes(disk.availableKb * 1024)} free`;
+}
+
+function diskTone(disk: RemoteDiskUsage): MetricTone {
+  const percent = diskPercent(disk);
+  if (percent >= 90) return "err";
+  if (percent >= 80) return "warn";
+  return "ok";
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Box, Flex, Tabs, Text } from "@radix-ui/themes";
+import { Box, Flex, Switch, Tabs, Text } from "@radix-ui/themes";
 
 import type {
   RemoteServerComponent,
@@ -10,6 +10,8 @@ import type { LogRow } from "../../types/log";
 import type { CustomTunnelStartRequest, ServerTunnelStartRequest, ServerTunnelStatus } from "../../types/tunnel";
 import type { ServerSubPage } from "../../types/ui";
 import { isManagementSubPage } from "../../types/ui";
+import { useStatusAutoRefresh } from "../../hooks/useStatusAutoRefresh";
+import { readStatusAutoRefresh, writeStatusAutoRefresh } from "../../services/storage";
 import { remoteServerDefaultUser, resolveServerStatus } from "../../utils/remote-server";
 import ActionButton from "../ui/ActionButton";
 import StatusPill from "../ui/StatusPill";
@@ -37,6 +39,8 @@ export type ServerDetailPageProps = {
   tunnels: Record<string, ServerTunnelStatus>;
   tunnelBusy: Record<string, boolean>;
   onRefresh: () => void;
+  /** Quiet status-only refresh used by auto-refresh. */
+  onPollStatus: () => Promise<void>;
   onRemove: () => void;
   onStartBattlegroup: () => void;
   onStopBattlegroup: () => void;
@@ -66,6 +70,7 @@ export default function ServerDetailPage(props: ServerDetailPageProps) {
     tunnels,
     tunnelBusy,
     onRefresh,
+    onPollStatus,
     onRemove,
     onStartBattlegroup,
     onStopBattlegroup,
@@ -82,6 +87,17 @@ export default function ServerDetailPage(props: ServerDetailPageProps) {
   const busy = !!busyLabel;
   const liveStatus = statusError ? undefined : status;
   const resolved = resolveServerStatus(statusError, liveStatus, busy, server);
+  const battlegroupStopped = liveStatus?.battlegroup.stop === true;
+
+  // Auto-refresh only while a live status is shown and nothing is running:
+  // an unreachable host is not retried in the background, and a poll never
+  // races a Start/Stop/Restart/Update (#22).
+  const [autoRefresh, setAutoRefreshState] = useState(readStatusAutoRefresh);
+  const setAutoRefresh = useCallback((enabled: boolean) => {
+    setAutoRefreshState(enabled);
+    writeStatusAutoRefresh(enabled);
+  }, []);
+  useStatusAutoRefresh(autoRefresh && !busy && !!liveStatus, onPollStatus, 30_000);
 
   const management = useManagementStatus(server, appendLogRow);
   const managementReady = isManagementReady(management.state);
@@ -123,6 +139,12 @@ export default function ServerDetailPage(props: ServerDetailPageProps) {
             </span>
           </Flex>
           <Flex align="center" gap="2">
+            <Flex align="center" gap="2" title="Refresh the server status every 30 seconds">
+              <Switch size="1" checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+              <Text size="1" color="gray">
+                Auto-refresh
+              </Text>
+            </Flex>
             <ActionButton onClick={onRefresh} busy={busy} pendingLabel="Refreshing">
               Refresh
             </ActionButton>
@@ -194,7 +216,13 @@ export default function ServerDetailPage(props: ServerDetailPageProps) {
             <>
               <Tabs.Content value="users" className="server-detail-tab-content">
                 <ManagementContent tunnelState={tunnelState} tunnelId={tunnelId}>
-                  {(id) => <UsersTab tunnelId={id} onSwitchToAdmin={goToAdmin} />}
+                  {(id) => (
+                    <UsersTab
+                      tunnelId={id}
+                      battlegroupStopped={battlegroupStopped}
+                      onSwitchToAdmin={goToAdmin}
+                    />
+                  )}
                 </ManagementContent>
               </Tabs.Content>
               <Tabs.Content value="admin" className="server-detail-tab-content">
