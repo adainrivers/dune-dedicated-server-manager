@@ -11,14 +11,14 @@ configure Hyper-V, provision Ubuntu, or manage external tools such as SteamCMD.
 ## Features
 
 - Remote server profile management with SSH private-key authentication
-- **Dashboard**: BattleGroup status, start, stop, and restart controls, read from live Kubernetes state
-- **Update**: installed vs. available game build and a one-click server update
+- **Dashboard**: BattleGroup status, start, stop, and restart controls, read from live Kubernetes state, with gateway health, per-server uptime, disk usage for the root and k3s storage filesystems, and optional 30-second auto-refresh
+- **Update**: installed vs. available game build and a one-click server update that downloads any newer Steam build
 - **Pods**: per-component health, live log tails, and safe per-pod restarts
 - Secure Director, File Browser, PostgreSQL, and PgHero access through local SSH tunnels, plus your own custom tunnels to any port on the host
 - Bundled `dune-server-service` daemon for on-host scheduled maintenance (daily restarts with in-game warnings, automated backups, server update check + apply), installed over SSH straight from the Management card on systemd (Ubuntu) and OpenRC (Alpine) hosts
-- **Users**: player list with online filter and auto-refresh, and a shortcut into the Admin tab for a selected player
+- **Users**: player list with online filter and auto-refresh (remembered, and paused while the BattleGroup is stopped), and a shortcut into the Admin tab for a selected player
 - **Admin**: console for in-game actions: item grants, service broadcasts, kicks, teleports, vehicle spawns, XP and skill changes, water refills, inventory and progression resets, player lookup with live pawn location, and a logged history of every published command
-- **Automated tasks**: separate enable switches for auto restart, auto update, and auto backup; editable schedules (daily restart time, warning lead/frequency, update apply lead, backup cron, IANA timezone); recent run history; and cleanup of finished database operations. Saving restarts the service so changes apply immediately
+- **Automated tasks**: separate enable switches for auto restart, auto update, and auto backup, which never overlap (each waits for the one in progress); editable schedules (daily restart time, warning lead/frequency, update apply lead, backup cron, IANA timezone); recent run history; and cleanup of finished database operations. Saving restarts the service so changes apply immediately
 - **Welcome Package**: automatically gives new players a set of backpack items (water containers arrive full) and an optional welcome whisper. Items are written directly to the game database, tracked in the management service's SQLite ledger, and failed deliveries can be retried. Configure it with a visual editor or raw JSON
 - In-app update check that shows the release notes before you install
 

@@ -735,10 +735,20 @@ PY
 chmod +x setup.sh setup/k3s.sh setup/helper.sh setup/experimental_swap.sh battlegroup.sh
 
 if grep -RIn --exclude='*.ubuntu-patch.bak' 'rc-service\|rc-update\|openrc.k3s' setup; then
-  echo "Some Alpine/OpenRC references remain. Stop here and inspect the lines above."
-  exit 1
+  echo "Some Alpine/OpenRC references remain (listed above). Read the note below before running setup.sh."
+else
+  echo "Vendor scripts are patched for Ubuntu."
 fi
 ```
+
+This check runs in your login shell, so it only prints a message. It does not stop anything or close your SSH session.
+
+Newer server packages can add scripts that this patch does not cover yet, such as `setup/vm_ip.sh`. If the check lists lines from such a file, look at each one before running `setup.sh`. Ubuntu has no `rc-service` or `rc-update`, so the matching systemd commands are:
+
+- `rc-service NAME start|stop|restart` becomes `systemctl start|stop|restart NAME`
+- `rc-update add NAME` becomes `systemctl enable NAME`
+
+Change a line only when `setup.sh` actually runs it on your host. Lines that apply only to the Alpine-based Hyper-V VM can stay as they are.
 
 ## 12. Run the vendor setup script
 
@@ -874,11 +884,16 @@ while [ "$elapsed" -lt 180 ]; do
   elapsed=$((elapsed + 5))
 done
 
-if [ "${phase:-}" != "Running" ]; then
-  echo "Database pod $DBPOD is not running yet; wait and rerun this step."
-  exit 1
+if [ "${phase:-}" = "Running" ]; then
+  echo "Database pod $DBPOD is running. Continue with the next block."
+else
+  echo "Database pod $DBPOD is not running yet. Wait a minute and rerun this block before continuing."
 fi
+```
 
+Continue only after the block above prints that the database pod is running:
+
+```sh
 SUPER_USER="$(sudo kubectl get databasedeployment "$DDEP" -n "$NS" -o jsonpath='{.spec.superUser}')"
 SUPER_PASSWORD="$(sudo kubectl get databasedeployment "$DDEP" -n "$NS" -o jsonpath='{.spec.superPassword}')"
 DB_PORT="$(sudo kubectl get databasedeployment "$DDEP" -n "$NS" -o jsonpath='{.spec.port}')"
