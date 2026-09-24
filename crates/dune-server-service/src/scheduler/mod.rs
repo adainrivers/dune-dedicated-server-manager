@@ -5,6 +5,7 @@ use chrono_tz::Tz;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+pub mod maintenance;
 pub mod runner;
 pub mod schedule;
 pub mod task;

@@ -30,6 +30,10 @@ impl Task for BackupTask {
         "backup"
     }
 
+    fn exclusive(&self) -> bool {
+        true
+    }
+
     fn schedule(&self) -> Schedule {
         // Two gates: the `backup_enabled` master switch and a parsed cron.
         // Vendor backups block server I/O for the whole dump, so a cron must be

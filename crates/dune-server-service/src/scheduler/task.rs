@@ -24,6 +24,12 @@ pub trait Task: Send + Sync + 'static {
     fn id(&self) -> &'static str;
     fn schedule(&self) -> Schedule;
     async fn run(&self, ctx: &TaskCtx) -> Result<TaskOutcome>;
+
+    /// True for tasks that disrupt the BattleGroup (restart, backup, update
+    /// apply). The runner lets only one of them run at a time (#37).
+    fn exclusive(&self) -> bool {
+        false
+    }
 }
 
 /// Context handed to each task invocation. Holds run-scoped state (run_id,

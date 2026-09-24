@@ -8,14 +8,17 @@ use tokio::sync::Mutex;
 use crate::store::{NewLogEntry, Store, TaskRunStatus, TaskTrigger};
 use crate::tasks::TaskEnv;
 
+use super::maintenance::MaintenanceGate;
 use super::task::{Task, TaskCtx, TaskOutcome};
 
 /// Coordinates task execution: assigns run IDs, persists status transitions,
-/// and enforces the single-instance-per-task overlap guard.
+/// and enforces the single-instance-per-task overlap guard plus the
+/// one-maintenance-task-at-a-time gate.
 pub struct TaskRunner {
     store: Store,
     env: Arc<TaskEnv>,
     running: Mutex<HashSet<&'static str>>,
+    maintenance: MaintenanceGate,
 }
 
 impl TaskRunner {
@@ -24,6 +27,7 @@ impl TaskRunner {
             store,
             env,
             running: Mutex::new(HashSet::new()),
+            maintenance: MaintenanceGate::new(),
         }
     }
 
@@ -81,7 +85,24 @@ impl TaskRunner {
         };
         ctx.log_info(&format!("Starting task {id}."))?;
 
+        // Dry runs never touch the BattleGroup, so they skip the gate.
+        let slot = if task.exclusive() && !dry_run {
+            Some(match self.maintenance.try_acquire(id) {
+                Ok(slot) => slot,
+                Err(holder) => {
+                    let _ = ctx.log_info(&format!(
+                        "waiting for {} to finish before running {id}",
+                        holder.unwrap_or("another maintenance task")
+                    ));
+                    self.maintenance.acquire(id).await
+                }
+            })
+        } else {
+            None
+        };
+
         let result = task.run(&ctx).await;
+        drop(slot);
 
         {
             let mut guard = self.running.lock().await;

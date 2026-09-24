@@ -31,6 +31,10 @@ impl Task for UpdateApplyTask {
         "update-apply"
     }
 
+    fn exclusive(&self) -> bool {
+        true
+    }
+
     fn schedule(&self) -> Schedule {
         if self.env.update_enabled {
             Schedule::interval_secs(60)
