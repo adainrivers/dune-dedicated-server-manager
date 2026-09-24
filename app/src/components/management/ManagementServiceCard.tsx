@@ -337,7 +337,8 @@ export default function ManagementServiceCard({
           <AlertDialog.Title>Uninstall management service?</AlertDialog.Title>
           <AlertDialog.Description size="2">
             Stops and removes <Text className="mono">dune-server-service</Text> and its unit file from the host.
-            The SQLite history database under <Text className="mono">/opt/dune-server-service</Text> will be deleted.
+            Its settings, run history, and welcome-package ledger stay in the service account&apos;s{" "}
+            <Text className="mono">~/.dune/state</Text>, so reinstalling picks them up again.
           </AlertDialog.Description>
           <Flex gap="2" mt="4" justify="end">
             <AlertDialog.Cancel>
